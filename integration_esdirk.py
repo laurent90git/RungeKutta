@@ -7,9 +7,9 @@ import scipy.integrate
 import scipy.interpolate
 from damped_newton import damped_newton_solve
 
-newtonchoice=2
+newtonchoice=2 #0: Scipy's fsolve 1: Scipy's newton (bad !), 2: custom damped Newton
 
-def ERK_integration(fun, y0, t_span, nt, A, b, c, jacfun=None, bPrint=True, vectorized=False):
+def ERK_integration(fun, y0, t_span, nt, A, b, c, jacfun=None, bPrint=True):
     """ Performs the integration of the system dy/dt = f(t,y)
         from t=t_span[0] to t_span[1], with initial condition y(t_span[0])=y0.
         The RK method described by A,b,c is an explicit method
@@ -32,55 +32,38 @@ def ERK_integration(fun, y0, t_span, nt, A, b, c, jacfun=None, bPrint=True, vect
     dt = (t_span[1]-t_span[0]) / (nt-1) # time step
     s = np.size(b) # number of stages for the RK method
 
-    y = np.zeros((n, nt)) # solution accros all time steps
+    y = np.zeros((n, nt), order='F') # solution accros all time steps
     y[:,0] = y0
-
-    ## make sure the function is vectorised
-    if vectorized:
-        fun_vectorised = fun
-    else:
-        def fun_vectorised(t,x):
-            """ Vectorize a non-vectorized function """
-            if x.ndim==1:
-                return fun(t,x)
-            else:
-                if not (isinstance(t, np.ndarray)):
-                    t = t*np.ones((x.shape[1]))
-                res0 = fun(t[0],x[:,0])
-                res = np.zeros((res0.shape[0],x.shape[1]))
-                res[:,0]=res0
-                for i in range(1,x.shape[1]):
-                    res[:,i] = fun(t[i],x[:,i])
-                return res
 
     ## advance in time
     out.nfev = 0
     out.njev = 0
-    Y = np.zeros((n, s))
-    K = np.zeros((n, s))
+    Y = np.zeros((n, s), order='F')
+    K = np.zeros((n, s), order='F')
     unm1 = np.copy(y0)
-    At = A.T
     for it, tn in enumerate(t[:-1]):
-        if bPrint:
+        if bPrint: # print progress
           if np.mod(it,np.floor(nt/10))==0:
               print('\n{:.1f} %'.format(100*it/nt), end='')
           if np.mod(it,np.floor(nt/100))==0:
               print('.', end='')
-        # for j in range(s):
-        #     Y[:,j] = unm1 + dt*K.dot(At)
-        #     K[:,j] = fun(tn+c[j]*dt, Y[:,j])
         Y[:,0]=unm1[:]
         K[:,0] = fun(tn+c[0]*dt, Y[:,0])
-        for i in range(1,s):
-            Y[:,i] = unm1[:]
-            for j in range(s):
-                Y[:,i] += dt*K[:,j]*A[i,j]
+        ## compute each stage sequentially
+        for i in range(1,s): 
+            # Yi = y0 + dt*sum_{j=1}^{i-1} a_{ij} f(Yj))$
+              # Y[:,i] = unm1[:]
+              # for j in range(i):
+              #     Y[:,i] += dt*K[:,j]*A[i,j]
+            Y[:,i] = unm1[:] + dt * K[:,:i].dot( A[i,:i] )
             K[:,i] = fun(tn+c[i]*dt, Y[:,i])
 
-        out.nfev += s
-        for j in range(s):
-            unm1[:] = unm1[:] + dt*b[j]*K[:,j]
+        ## compute the new solution value at time t_{n+1}
+          # for j in range(s):
+          #     unm1[:] = unm1[:] + dt*b[j]*K[:,j]
+        unm1[:] = unm1[:] + dt * K.dot( b )
         y[:,it+1] = unm1[:]
+        out.nfev += s
 
     # END OF INTEGRATION
     out.y = y
@@ -154,7 +137,7 @@ def FIRK_integration(fun, y0, t_span, nt, A, b, c, jacfun=None, bPrint=True, vec
     ## advance in time
     out.nfev = 0
     out.njev = 0
-    K= np.zeros((n, s))
+    K= np.zeros((n, s), order='F')
     unm1 = np.copy(y0)
     At = A.T
     warm_start_dict = None
@@ -204,8 +187,10 @@ def FIRK_integration(fun, y0, t_span, nt, A, b, c, jacfun=None, bPrint=True, vec
             unm1 = y_substeps[-n:]
         else:
             # Y_{n+1} = Y_{n} + \Delta t \sum\limits_{i=1}^{s} b_i k_i
-            for j in range(s):
-                unm1[:] = unm1[:] + dt*b[j]*K[:,j]
+            # for j in range(s):
+                # unm1[:] = unm1[:] + dt*b[j]*K[:,j]
+            unm1[:] = unm1[:] + dt * K.dot( b )
+
         y[:,it+1] = unm1[:]
 
     # END OF INTEGRATION
@@ -308,7 +293,7 @@ if __name__=='__main__':
     print('Testing time integration ESDIRK routine with mass-spring system')
     import matplotlib.pyplot as plt
     import rk_coeffs
-    problemtype = 'non-stiff'
+    problemtype = 'stiff'
     if problemtype=='non-stiff': # ODE
         k_sur_m = 33.
         Amod = np.array( ( (0,1),(-k_sur_m, 0) ))
@@ -329,23 +314,14 @@ if __name__=='__main__':
         tf = 5.0
         nt = 30
     elif problemtype=='dae': # DAE simple : y1'=y1, 0=y1+y2
-        raise Exception('TODO')
-        def modelfun(t,x,options={}):
-            """ Mass-spring system"""
-            Xdot = np.zeros_like(x)
-            Xdot[0] = x[0]
-            Xdot[1] = x[0]+x[1]
-            return Xdot
+        raise Exception('TODO: DAEs are not yet compatible with the chosen formulation')
 
-        y0 = np.array((0.3,1))
-        tf = 2.0
-        nt = 100
-
-    # comment se fait-il que les méthodes implicites marchent pas trop mal en explicite ???
     # mod ='FIRK'
     # method='Radau5'
-    mod ='FIRK'
+    mod ='DIRK'
     method='L-SDIRK-33'
+    # mod = 'ERK'
+    # method= 'rk4'
     # method='Radau5'
     if mod=='DIRK': # DIRK solve
         A,b,c = rk_coeffs.getButcher(name=method)
@@ -364,7 +340,7 @@ if __name__=='__main__':
     # dt = sol.t[1]-sol.t[0]
     # sol_ref = scipy.integrate.solve_ivp(fun=modelfun, t_span=[0., tf], y0=y0, method='RK45',
     #                                 atol=1e9, rtol=1e9, max_step=dt, first_step=dt)
-    sol_ref = scipy.integrate.solve_ivp(fun=modelfun, t_span=[0., tf], y0=y0, method='RK45',
+    sol_ref = scipy.integrate.solve_ivp(fun=modelfun, t_span=[0., tf], y0=y0, method='DOP853',
                                     atol=1e-13, rtol=1e-13)
 
     plt.figure()
@@ -378,17 +354,22 @@ if __name__=='__main__':
     plt.ylabel('position')
     plt.show()
 
-    # raise Exception('calcul ordre convergence Radau5 EXPLICITE par curiosité !')
     if 0:
         #%%
         import time as pytime
         t_start = pytime.time()
-        methods = [('Radau5', 'FIRK')] #, ('Radau5', 'DIRK'), ('Radau5', 'ERK')]
-        # methods = [('Radau5', 'FIRK'), ('ESDIRK54A', 'DIRK'),
-                   # ('L-SDIRK-33', 'DIRK'), ('ESDIRK32A', 'DIRK'),
-                   # ('ESDIRK43B', 'DIRK'), ('IE', 'DIRK'),
-                   # ('IE', 'FIRK'), ('EE', 'ERK'), ('RK10', 'ERK')
-                   # ]
+        # methods = [('Radau5', 'FIRK')] #, ('Radau5', 'DIRK'), ('Radau5', 'ERK')]
+        methods = [
+                    # ('Radau5', 'FIRK'), ('ESDIRK54A', 'DIRK'),
+                    ('L-SDIRK-33', 'DIRK'),
+                    # ('ESDIRK32A', 'DIRK'),
+                    # ('ESDIRK43B', 'DIRK'),
+                    ('IE', 'DIRK'),
+                    ('IE', 'FIRK'),
+                    # ('EE', 'ERK'),
+                    # ('RK10', 'ERK'),
+                    ('RK4', 'ERK'),
+                    ]
         fig_conv = plt.figure()
         nt_vec = np.logspace(np.log10(10), np.log10(500), 8).astype(int)
         for method, mod in methods:
@@ -406,7 +387,7 @@ if __name__=='__main__':
                 elif mod=='ERK': # FIRK solve
                     A,b,c = rk_coeffs.getButcher(name=method)
                     sol = ERK_integration(fun=modelfun, y0=y0, t_span=[0., tf], nt=nt,
-                                                A=A, b=b, c=c, jacfun=None)
+                                                A=A, b=b, c=c, jacfun=None, bPrint=False)
                 else:
                     raise Exception('mod {} is not recognised'.format(mod))
                 sols.append(sol)
@@ -417,10 +398,13 @@ if __name__=='__main__':
             for i in range(len(nt_vec)):
                 interped_ref = scipy.interpolate.interp1d(x=sol_ref.t, y=sol_ref.y, axis=1, kind='cubic')( sols[i].t )
                 error[i]  = np.linalg.norm( (sols[i].y - interped_ref) )
-                error2[i] = np.linalg.norm( sols[i].y[:,-1]-sols[imax].y[:,-1] )
-            fig_conv.gca().loglog(nt_vec, error, label='{} ({})'.format(method, mod), marker='.')
+                error2[i] = np.linalg.norm( sols[i].y[:,-1]-sol_ref.y[:,-1] )
+            # fig_conv.gca().loglog(nt_vec, error, label='{} ({})'.format(method, mod), marker='.')
+            fig_conv.gca().loglog(nt_vec, error2, label='{} ({})'.format(method, mod), marker='.')
         fig_conv.gca().legend(framealpha=0.25)
         fig_conv.gca().grid()
+        fig_conv.gca().set_ylim(1e-16,1e5)
+        
         t_end = pytime.time()
         print('done in {}s with newtonchoice={}'.format(t_end-t_start, newtonchoice))
 
