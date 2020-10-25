@@ -34,7 +34,7 @@ def damped_newton_solve(fun, x0, rtol=1e-9, ftol=1e-30, jacfun=None, warm_start_
     if jacfun:
         jac_estimator = jacfun
     elif jac_estimator is None:
-        custom_print('analyzing jacobian sparisty pattern')
+        print('analyzing jacobian sparisty pattern')
         global ncalls
         def tempfun(x):
           global ncalls
@@ -48,18 +48,21 @@ def damped_newton_solve(fun, x0, rtol=1e-9, ftol=1e-30, jacfun=None, warm_start_
           # assert ncalls_naive==x0.size+1, 'ncalls_naive={}, but x0.size={}'.format(ncalls_naive, x0.size)
           jac_sparsity = 1*(Jac_full!=0.)
         ncalls = 0
-        jac_sparsity = None # TODO: fPOURQUOI CA NE MARCHE PAS SI ON UTILISE LE SPARSITY PATTERN...
+        # jac_sparsity = None # TODO: dans certains cas, la jacobienne "intelligente" ne correspond pas bien...
         # g = scipy.optimize._numdiff.group_columns(Jac_full, order=0)
-        jac_estimator = lambda x: scipy.optimize._numdiff.approx_derivative(fun=fun, x0=x, method='2-point',
+        jac_estimator = lambda x: scipy.optimize._numdiff.approx_derivative(fun=tempfun, x0=x, method='2-point',
                                                                 rel_step=1e-8, f0=None, sparsity=jac_sparsity,
-                                                                as_linear_operator=False, args=(), kwargs={})#.toarray()
+                                                                as_linear_operator=False, args=(), kwargs={}).toarray()
         Jac_grouped = jac_estimator((x0))
         
         ncalls_grouped = ncalls
-        custom_print('Sparsity pattern allows for {} calls instead of {}'.format(ncalls_grouped, ncalls_naive))
+        print('Sparsity pattern allows for {} calls instead of {}'.format(ncalls_grouped, ncalls_naive))
 
-        assert np.all(Jac_grouped==Jac_full)
-
+        if not np.all(Jac_grouped==Jac_full): # check the clever Jacobian is correct
+          print('/!\ Issue with the banded Jacobian estimation, using full Jacobian instead...')
+          jac_estimator = lambda x: scipy.optimize._numdiff.approx_derivative(fun=tempfun, x0=x, method='2-point',
+                                                                rel_step=1e-8, f0=None, sparsity=None,
+                                                                as_linear_operator=False, args=(), kwargs={})
     # initiate computation
     tau=1.0 # initial damping factor #TODO: warm start information ?
     convergenceMode = 0
@@ -169,8 +172,20 @@ def damped_newton_solve(fun, x0, rtol=1e-9, ftol=1e-30, jacfun=None, warm_start_
             dx_norm = np.linalg.norm(dx)
             res_norm = np.linalg.norm(res)
 
+            # TODO: Rank-1 update of the Jacobian ?
+            if tau==1. and not bUpdateJacobian: # no damping was applied, the Jacobian can be correctly updated
+              # adapted from equation (1.60) of "A family of Newton Codes for Systems of Highly Nonlinear Equations" by Nowak and Deuflhard
+              # --> seems to be useless in my test cases
+              if dx_norm>1e-15:
+                custom_print('\t rank-1 update of the Jacobian matrix')
+                jac = jac + np.outer(res,dx)/dx_norm
+                LUdec = scipy.linalg.lu_factor(jac)
+                nlu  += 1
+              
             # TODO: increase tau if convergence rate was good ?
             tau = 1. #min((tau*10., 1.))
+            
+            
 
             if res_norm < ftol:
                 custom_print('residual norm has converged')
@@ -246,7 +261,7 @@ if __name__=='__main__':
 
     elif nprob==2: # quadratic problem - 2 vars (ellipse)
       aa = 4e3
-      bb = 1e3
+      bb = 0. #1e3
       fun =    lambda x: np.array( (aa*x[0]**2, x[1]**2))+ bb*x
       jacfun = lambda x: np.array( [ [aa*2*x[0], 0.], [0., 2*x[1]] ] ) + bb*np.eye(x.size)
       x0 = np.array((0.5,0.5))

@@ -207,16 +207,14 @@ if __name__=='__main__': # TEST RUN
     # method='IE'; mod ='DIRK'
     # method='L-SDIRK-33'; mod ='DIRK'
     nt=100
+    A,b,c = rk_coeffs.getButcher(name=method)
     if mod=='DIRK': # DIRK solve
-        A,b,c = rk_coeffs.getButcher(name=method)
         out = DIRK_integration(fun=lambda t,x: modelfun(t=t,z=x,options=options),
                                y0=y0, t_span=[0., tf], nt=nt, A=A, b=b, c=c, jacfun=jacfun)
     elif mod=='FIRK': # FIRK solve
-        A,b,c = rk_coeffs.getButcher(name=method)
         out = FIRK_integration(fun=lambda t,x: modelfun(t=t,z=x,options=options),
                                y0=y0, t_span=[0., tf], nt=nt, A=A, b=b, c=c, jacfun=jacfun)
     elif mod=='ERK': # FIRK solve
-        A,b,c = rk_coeffs.getButcher(name=method)
         out = ERK_integration(fun=lambda t,x: modelfun(t=t,z=x,options=options),
                                y0=y0, t_span=[0., tf], nt=nt, A=A, b=b, c=c, jacfun=jacfun)
   ##### POST-PROCESSING

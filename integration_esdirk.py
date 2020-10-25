@@ -7,9 +7,9 @@ import scipy.integrate
 import scipy.interpolate
 from damped_newton import damped_newton_solve
 
-newtonchoice=2 #0: Scipy's fsolve 1: Scipy's newton (bad !), 2: custom damped Newton
+NEWTONCHOICE=2 #0: Scipy's fsolve 1: Scipy's newton (bad !), 2: custom damped Newton
 
-def ERK_integration(fun, y0, t_span, nt, A, b, c, jacfun=None, bPrint=True):
+def ERK_integration(fun, y0, t_span, nt, A, b, c, jacfun=None, bPrint=True, newtonchoice=NEWTONCHOICE):
     """ Performs the integration of the system dy/dt = f(t,y)
         from t=t_span[0] to t_span[1], with initial condition y(t_span[0])=y0.
         The RK method described by A,b,c is an explicit method
@@ -72,7 +72,8 @@ def ERK_integration(fun, y0, t_span, nt, A, b, c, jacfun=None, bPrint=True):
 
 
 
-def FIRK_integration(fun, y0, t_span, nt, A, b, c, jacfun=None, bPrint=True, vectorized=False):
+def FIRK_integration(fun, y0, t_span, nt, A, b, c, jacfun=None, bPrint=True, vectorized=False,newtonchoice=NEWTONCHOICE,
+                     fullDebug=False):
     """ Performs the integration of the system dy/dt = f(t,y)
         from t=t_span[0] to t_span[1], with initial condition y(t_span[0])=y0.
         The RK method described by A,b,c is fully implicit (e.g RadauIIA ...).
@@ -86,6 +87,8 @@ def FIRK_integration(fun, y0, t_span, nt, A, b, c, jacfun=None, bPrint=True, vec
         - c      :  (1D-array)        RK substeps time
 
         - jacfun  :  (function handle, optional) function returning a 2D-array (Jacobian df/dy)
+        
+        TODO: take into account the jacfun argument
         """
     assert y0.ndim==1, 'y0 must be 0D or 1D'
 
@@ -98,9 +101,6 @@ def FIRK_integration(fun, y0, t_span, nt, A, b, c, jacfun=None, bPrint=True, vec
 
     y = np.zeros((n, nt)) # solution accros all time steps
     y[:,0] = y0
-
-    J=None # Jacobian of the ODE function
-
 
     ## make sure the function is vectorised
     if vectorized:
@@ -141,7 +141,8 @@ def FIRK_integration(fun, y0, t_span, nt, A, b, c, jacfun=None, bPrint=True, vec
     unm1 = np.copy(y0)
     At = A.T
     warm_start_dict = None
-    global newtonchoice
+    infodict_hist = {} # additonal optional debug storage
+    out.infodict_hist = infodict_hist
     for it, tn in enumerate(t[:-1]):
         if bPrint:
           if np.mod(it,np.floor(nt/10))==0:
@@ -175,8 +176,26 @@ def FIRK_integration(fun, y0, t_span, nt, A, b, c, jacfun=None, bPrint=True, vec
                                                                         itmax=100, jacmax=20, tau_min=1e-4, convergenceMode=0)
             out.nfev += infodict['nfev']
             out.njev += infodict['njev']
-            if infodict['ier']!=0:
-              raise Exception('Newton did not converge')
+            if infodict['ier']!=0: # Newton did not converge
+              # restart the Newton solve with all outputs enabled
+              y_substeps, infodict, warm_start_dict = damped_newton_solve(fun=lambda x: resfun(Y=x,y0=unm1, tn=tn, dt=dt, A=At, n=n, s=s),
+                                                                        x0=np.copy(yini), rtol=1e-9, ftol=1e-30,
+                                                                        jacfun=None, warm_start_dict=warm_start_dict,
+                                                                        itmax=100, jacmax=20, tau_min=1e-4, convergenceMode=0, bPrint=True)
+              msg = 'Newton did not converge'
+              # raise Exception(msg)
+              out.y = y[:,:it+1]
+              out.t = t[:it+1]
+              out.message = msg
+              return out
+            if fullDebug: # store additional informations about the Newton solve
+              if not bool(infodict_hist): # the debug dictionnary has not yet been initialised
+                for key in infodict.keys():
+                  if not isinstance(infodict[key], np.ndarray) and (key!='ier' and key!='msg'): # only save single values
+                    infodict_hist[key] = [infodict[key]]
+              else: # backup already initialised
+                for key in infodict_hist.keys():
+                  infodict_hist[key].append(infodict[key])
         else:
             raise Exception('newton choice is not recognised')
         K[:,:] = fun_vectorised(tn+c*dt, y_substeps.reshape((n,s), order='F'))
@@ -200,7 +219,7 @@ def FIRK_integration(fun, y0, t_span, nt, A, b, c, jacfun=None, bPrint=True, vec
 
 
 ########################################################################################
-def DIRK_integration(fun, y0, t_span, nt, A, b, c, jacfun=None, bPrint=True):
+def DIRK_integration(fun, y0, t_span, nt, A, b, c, jacfun=None, bPrint=True, newtonchoice=NEWTONCHOICE, fullDebug=False):
     """ Performs the integration of the system dy/dt = f(t,y)
         from t=t_span[0] to t_span[1], with initial condition y(t_span[0])=y0.
         The RK method described by A,b,c may be explicit or diagonally-implicit.
@@ -228,10 +247,11 @@ def DIRK_integration(fun, y0, t_span, nt, A, b, c, jacfun=None, bPrint=True):
 
     K= np.zeros((np.size(y0), s))
     unm1 = np.copy(y0)
-    global newtonchoice
     warm_start_dict=None
     out.nfev = 0
     out.njev = 0
+    infodict_hist = {} # additonal optional debug storage
+    out.infodict_hist = infodict_hist
     for it, tn in enumerate(t[:-1]):
         if bPrint:
           if np.mod(it,np.floor(nt/10))==0:
@@ -268,11 +288,26 @@ def DIRK_integration(fun, y0, t_span, nt, A, b, c, jacfun=None, bPrint=True):
                     kni, infodict, warm_start_dict = damped_newton_solve(
                         fun=tempfun, x0=K[:,0],rtol=1e-9, ftol=1e-30, jacfun=None, warm_start_dict=warm_start_dict,
                         itmax=30, jacmax=10, tau_min=1e-4, convergenceMode=0)
-                    if infodict['ier']!=0:
+                    if infodict['ier']!=0: # Newton did not converge
+                      # restart the Newton solve with all outputs enabled
                       kni, infodict, warm_start_dict = damped_newton_solve(
                         fun=tempfun, x0=K[:,0],rtol=1e-9, ftol=1e-30, jacfun=None, warm_start_dict=warm_start_dict,
                         itmax=30, jacmax=10, tau_min=1e-4, convergenceMode=0, bPrint=True)
-                      raise Exception('Newton did not converge: infodict={}'.format(infodict))
+                      # raise Exception('Newton did not converge: infodict={}'.format(infodict))
+                      msg = 'Newton did not converge'
+                      # raise Exception(msg)
+                      out.y = y[:,:it+1]
+                      out.t = t[:it+1]
+                      out.message = msg
+                      return out
+                    if fullDebug: # store additional informations about the Newton solve
+                      if not bool(infodict_hist): # the debug dictionnary has not yet been initialised
+                        for key in infodict.keys():
+                          if not isinstance(infodict[key], np.ndarray) and (key!='ier' and key!='msg'): # only save single values
+                            infodict_hist[key] = [infodict[key]]
+                      else: # backup already initialised
+                        for key in infodict_hist.keys():
+                          infodict_hist[key].append(infodict[key])
                     out.nfev += infodict['nfev']
                     out.njev += infodict['njev']
                 else:
@@ -414,5 +449,5 @@ if __name__=='__main__':
     fig_conv.gca().set_ylim(1e-16,1e5)
     
     t_end = pytime.time()
-    print('done in {}s with newtonchoice={}'.format(t_end-t_start, newtonchoice))
+    print('done in {}s with newtonchoice={}'.format(t_end-t_start, NEWTONCHOICE))
 
