@@ -290,11 +290,24 @@ def DIRK_integration(fun, y0, t_span, nt, A, b, c, jacfun=None, bPrint=True):
 
 
 if __name__=='__main__':
-    print('Testing time integration ESDIRK routine with mass-spring system')
     import matplotlib.pyplot as plt
     import rk_coeffs
+    
+    #%% Single method test
+    #### PARAMETERS ####
     problemtype = 'stiff'
+    
+    # mod ='FIRK'
+    # method='Radau5'
+    mod ='DIRK'
+    method='L-SDIRK-33'
+    # mod = 'ERK'
+    # method= 'rk4'
+    # method='Radau5'
+    
+    ### Setup and solve the problem
     if problemtype=='non-stiff': # ODE
+        print('Testing time integration routines with mass-spring system')
         k_sur_m = 33.
         Amod = np.array( ( (0,1),(-k_sur_m, 0) ))
         def modelfun(t,x,options={}):
@@ -306,6 +319,7 @@ if __name__=='__main__':
         tf = 2.0
         nt = 20
     elif problemtype=='stiff': #  Hirschfelder-Curtiss
+        print('Testing time integration routines with Hirschfelder-Curtiss stiff equation')
         k=10.
         def modelfun(t,x):
             """ Mass-spring system"""
@@ -315,24 +329,17 @@ if __name__=='__main__':
         nt = 30
     elif problemtype=='dae': # DAE simple : y1'=y1, 0=y1+y2
         raise Exception('TODO: DAEs are not yet compatible with the chosen formulation')
+    elif problemtype=='pde':
+        raise Exception('TODO')
 
-    # mod ='FIRK'
-    # method='Radau5'
-    mod ='DIRK'
-    method='L-SDIRK-33'
-    # mod = 'ERK'
-    # method= 'rk4'
-    # method='Radau5'
+    A,b,c = rk_coeffs.getButcher(name=method)
     if mod=='DIRK': # DIRK solve
-        A,b,c = rk_coeffs.getButcher(name=method)
         sol = DIRK_integration(fun=modelfun, y0=y0, t_span=[0., tf], nt=nt,
                                     A=A, b=b, c=c, jacfun=None)
     elif mod=='FIRK': # FIRK solve
-        A,b,c = rk_coeffs.getButcher(name=method)
         sol = FIRK_integration(fun=modelfun, y0=y0, t_span=[0., tf], nt=nt,
                                     A=A, b=b, c=c, jacfun=None)
     elif mod=='ERK': # FIRK solve
-        A,b,c = rk_coeffs.getButcher(name=method)
         sol = ERK_integration(fun=modelfun, y0=y0, t_span=[0., tf], nt=nt,
                                     A=A, b=b, c=c, jacfun=None)
     else:
@@ -340,6 +347,7 @@ if __name__=='__main__':
     # dt = sol.t[1]-sol.t[0]
     # sol_ref = scipy.integrate.solve_ivp(fun=modelfun, t_span=[0., tf], y0=y0, method='RK45',
     #                                 atol=1e9, rtol=1e9, max_step=dt, first_step=dt)
+    ## Compute a reference solution with adaptive time step
     sol_ref = scipy.integrate.solve_ivp(fun=modelfun, t_span=[0., tf], y0=y0, method='DOP853',
                                     atol=1e-13, rtol=1e-13)
 
@@ -354,57 +362,57 @@ if __name__=='__main__':
     plt.ylabel('position')
     plt.show()
 
-    if 0:
-        #%%
-        import time as pytime
-        t_start = pytime.time()
-        # methods = [('Radau5', 'FIRK')] #, ('Radau5', 'DIRK'), ('Radau5', 'ERK')]
-        methods = [
-                    # ('Radau5', 'FIRK'), ('ESDIRK54A', 'DIRK'),
-                    ('L-SDIRK-33', 'DIRK'),
-                    # ('ESDIRK32A', 'DIRK'),
-                    # ('ESDIRK43B', 'DIRK'),
-                    ('IE', 'DIRK'),
-                    ('IE', 'FIRK'),
-                    # ('EE', 'ERK'),
-                    # ('RK10', 'ERK'),
-                    ('RK4', 'ERK'),
-                    ]
-        fig_conv = plt.figure()
-        nt_vec = np.logspace(np.log10(10), np.log10(500), 8).astype(int)
-        for method, mod in methods:
-            sols = []
-            A,b,c = rk_coeffs.getButcher(name=method)
-            for nt in nt_vec:
-                if mod=='DIRK': # DIRK solve
-                    A,b,c = rk_coeffs.getButcher(name=method)
-                    sol = DIRK_integration(fun=modelfun, y0=y0, t_span=[0., tf], nt=nt,
-                                                A=A, b=b, c=c, jacfun=None)
-                elif mod=='FIRK': # FIRK solve
-                    A,b,c = rk_coeffs.getButcher(name=method)
-                    sol = FIRK_integration(fun=modelfun, y0=y0, t_span=[0., tf], nt=nt,
-                                                A=A, b=b, c=c, jacfun=None)
-                elif mod=='ERK': # FIRK solve
-                    A,b,c = rk_coeffs.getButcher(name=method)
-                    sol = ERK_integration(fun=modelfun, y0=y0, t_span=[0., tf], nt=nt,
-                                                A=A, b=b, c=c, jacfun=None, bPrint=False)
-                else:
-                    raise Exception('mod {} is not recognised'.format(mod))
-                sols.append(sol)
-            # compute error
-            imax = np.argmax(nt_vec)
-            error = np.zeros((len(nt_vec),))
-            error2 = np.zeros((len(nt_vec),))
-            for i in range(len(nt_vec)):
-                interped_ref = scipy.interpolate.interp1d(x=sol_ref.t, y=sol_ref.y, axis=1, kind='cubic')( sols[i].t )
-                error[i]  = np.linalg.norm( (sols[i].y - interped_ref) )
-                error2[i] = np.linalg.norm( sols[i].y[:,-1]-sol_ref.y[:,-1] )
-            # fig_conv.gca().loglog(nt_vec, error, label='{} ({})'.format(method, mod), marker='.')
-            fig_conv.gca().loglog(nt_vec, error2, label='{} ({})'.format(method, mod), marker='.')
-        fig_conv.gca().legend(framealpha=0.25)
-        fig_conv.gca().grid()
-        fig_conv.gca().set_ylim(1e-16,1e5)
-        
-        t_end = pytime.time()
-        print('done in {}s with newtonchoice={}'.format(t_end-t_start, newtonchoice))
+    
+    #%% Convergence study
+    import time as pytime
+    t_start = pytime.time()
+    # methods = [('Radau5', 'FIRK')] #, ('Radau5', 'DIRK'), ('Radau5', 'ERK')]
+    methods = [
+                ('Radau5', 'FIRK'), ('ESDIRK54A', 'DIRK'),
+                ('L-SDIRK-33', 'DIRK'),
+                # ('ESDIRK32A', 'DIRK'),
+                # ('ESDIRK43B', 'DIRK'),
+                ('IE', 'DIRK'),
+                ('IE', 'FIRK'),
+                ('EE', 'ERK'),
+                ('RK10', 'ERK'),
+                ('RK4', 'ERK'),
+                ]
+    fig_conv = plt.figure()
+    nt_vec = np.logspace(np.log10(10), np.log10(500), 8).astype(int)
+    for method, mod in methods:
+        sols = []
+        A,b,c = rk_coeffs.getButcher(name=method)
+        for nt in nt_vec:
+            if mod=='DIRK': # DIRK solve
+                A,b,c = rk_coeffs.getButcher(name=method)
+                sol = DIRK_integration(fun=modelfun, y0=y0, t_span=[0., tf], nt=nt,
+                                            A=A, b=b, c=c, jacfun=None)
+            elif mod=='FIRK': # FIRK solve
+                A,b,c = rk_coeffs.getButcher(name=method)
+                sol = FIRK_integration(fun=modelfun, y0=y0, t_span=[0., tf], nt=nt,
+                                            A=A, b=b, c=c, jacfun=None)
+            elif mod=='ERK': # FIRK solve
+                A,b,c = rk_coeffs.getButcher(name=method)
+                sol = ERK_integration(fun=modelfun, y0=y0, t_span=[0., tf], nt=nt,
+                                            A=A, b=b, c=c, jacfun=None, bPrint=False)
+            else:
+                raise Exception('mod {} is not recognised'.format(mod))
+            sols.append(sol)
+        # compute error
+        imax = np.argmax(nt_vec)
+        error = np.zeros((len(nt_vec),))
+        error2 = np.zeros((len(nt_vec),))
+        for i in range(len(nt_vec)):
+            interped_ref = scipy.interpolate.interp1d(x=sol_ref.t, y=sol_ref.y, axis=1, kind='cubic')( sols[i].t )
+            error[i]  = np.linalg.norm( (sols[i].y - interped_ref) )
+            error2[i] = np.linalg.norm( sols[i].y[:,-1]-sol_ref.y[:,-1] )
+        # fig_conv.gca().loglog(nt_vec, error, label='{} ({})'.format(method, mod), marker='.')
+        fig_conv.gca().loglog(nt_vec, error2, label='{} ({})'.format(method, mod), marker='.')
+    fig_conv.gca().legend(framealpha=0.25)
+    fig_conv.gca().grid()
+    fig_conv.gca().set_ylim(1e-16,1e5)
+    
+    t_end = pytime.time()
+    print('done in {}s with newtonchoice={}'.format(t_end-t_start, newtonchoice))
 
