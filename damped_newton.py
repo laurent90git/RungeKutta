@@ -20,8 +20,8 @@ def damped_newton_solve(fun, x0, rtol=1e-9, ftol=1e-30, jacfun=None, warm_start_
       custom_print = print
     else:
       def custom_print(*args, end=''):
-        pass  
-  
+        pass
+
     # recover previously computed Jacobian, Lu decomposition, jacobian estimation method
     if warm_start_dict:
         jac   = warm_start_dict['jac']
@@ -40,9 +40,13 @@ def damped_newton_solve(fun, x0, rtol=1e-9, ftol=1e-30, jacfun=None, warm_start_
           global ncalls
           ncalls+=1
           return fun(x)
+        # perttype = 'cs'; rel_step=1e-50
+        perttype = '3-point'; rel_step=1e-8
+        # perttype = '2-point'; rel_step=1e-8
+
         if jac_sparsity is None:
-          Jac_full = scipy.optimize._numdiff.approx_derivative(fun=tempfun, x0=x0, method='2-point',
-                                                               rel_step=1e-8, f0=None, bounds=(-np.inf, np.inf), sparsity=None,
+          Jac_full = scipy.optimize._numdiff.approx_derivative(fun=tempfun, x0=x0, method=perttype,
+                                                               rel_step=rel_step, f0=None, bounds=(-np.inf, np.inf), sparsity=None,
                                                                as_linear_operator=False, args=(), kwargs={})
           ncalls_naive = ncalls
           # assert ncalls_naive==x0.size+1, 'ncalls_naive={}, but x0.size={}'.format(ncalls_naive, x0.size)
@@ -50,11 +54,16 @@ def damped_newton_solve(fun, x0, rtol=1e-9, ftol=1e-30, jacfun=None, warm_start_
         ncalls = 0
         # jac_sparsity = None # TODO: dans certains cas, la jacobienne "intelligente" ne correspond pas bien...
         # g = scipy.optimize._numdiff.group_columns(Jac_full, order=0)
-        jac_estimator = lambda x: scipy.optimize._numdiff.approx_derivative(fun=tempfun, x0=x, method='2-point',
-                                                                rel_step=1e-8, f0=None, sparsity=jac_sparsity,
-                                                                as_linear_operator=False, args=(), kwargs={}).toarray()
+        if not (jac_sparsity is None):
+          jac_estimator = lambda x: scipy.optimize._numdiff.approx_derivative(fun=tempfun, x0=x, method=perttype,
+                                                                  rel_step=rel_step, f0=None, sparsity=jac_sparsity,
+                                                                  as_linear_operator=False, args=(), kwargs={}).toarray()
+        else:
+          jac_estimator = lambda x: scipy.optimize._numdiff.approx_derivative(fun=tempfun, x0=x, method=perttype,
+                                                                  rel_step=rel_step, f0=None, sparsity=jac_sparsity,
+                                                                  as_linear_operator=False, args=(), kwargs={})
         Jac_grouped = jac_estimator((x0))
-        
+
         ncalls_grouped = ncalls
         print('Sparsity pattern allows for {} calls instead of {}'.format(ncalls_grouped, ncalls_naive))
 
@@ -69,8 +78,12 @@ def damped_newton_solve(fun, x0, rtol=1e-9, ftol=1e-30, jacfun=None, warm_start_
     NITER_MAX = itmax
     NJAC_MAX = jacmax
     TAU_MIN  = tau_min
-    GOOD_CONVERGENCE_RATIO_STEP = 0.1
+    GOOD_CONVERGENCE_RATIO_STEP = 0.5
     GOOD_CONVERGENCE_RATIO_RES  = 0.5
+    NORM_ORD = None
+
+    nx = x0.size
+    bStoreIterates = (nx<=5)
 
     njev=0
     nlu=0
@@ -78,36 +91,45 @@ def damped_newton_solve(fun, x0, rtol=1e-9, ftol=1e-30, jacfun=None, warm_start_
     x_hist=[]
 
     x=np.copy(x0)
-    if x.size<5:
+    if bStoreIterates:
       x_hist.append( np.copy(x) )
-      
+
     if LUdec is None:
         if jac is None:
-            jac = jac_estimator(x=x)
+            jac = jac_estimator(x)
             njev += 1
         LUdec = scipy.linalg.lu_factor(jac)
         nlu  += 1
 
     res = fun(x) # initial residuals
     nfev=1
+
     dx = scipy.linalg.lu_solve(LUdec, res)
     nLUsolve=1
-    dx_norm = np.linalg.norm(dx)
-    res_norm = np.linalg.norm(dx)
+    dx_norm = np.linalg.norm(dx, ord=NORM_ORD)
+    res_norm = np.linalg.norm(res, ord=NORM_ORD)
     niter=0
     bSuccess=False
     bUpdateJacobian = False
     bFailed=False # true if exceeded iter / jac limit
+    bJacobianAlreadyUpdated = True # True if the last jacobian was compouted for the current value of x
+                                   # (ie if we ask to recompute it for the same x, there is a problem)
     while True: # cycle until convergence
         bAcceptedStep=False
         if bUpdateJacobian:
             custom_print('\tupdating Jacobian')
-            if njev > NJAC_MAX:
+            if bJacobianAlreadyUpdated:
+              custom_print('\t/!\ the jacobian has already been computed for this value of x --> convergence seems impossible...')
+              # TODO: accept one step, no matter the increase in ||dx||
+              # scaled norm of ||dx|| ?
+              bFailed = True
+            elif njev > NJAC_MAX:
                 bFailed = True
                 custom_print('too many jacobian evaluations')
             else:
-              jac = jac_estimator(x=x)
+              jac = jac_estimator(x)
               bUpdateJacobian = False
+              bJacobianAlreadyUpdated=True
               tau = 1. # TODO: bof ?
               njev += 1
               LUdec = scipy.linalg.lu_factor(jac)
@@ -116,8 +138,8 @@ def damped_newton_solve(fun, x0, rtol=1e-9, ftol=1e-30, jacfun=None, warm_start_
               # res = fun(x)
               dx  = scipy.linalg.lu_solve(LUdec, res)
               nLUsolve+=1
-              dx_norm = np.linalg.norm(dx)
-              res_norm = np.linalg.norm(res)
+              dx_norm = np.linalg.norm(dx, ord=NORM_ORD)
+              res_norm = np.linalg.norm(res, ord=NORM_ORD)
 
         niter+=1
         if niter > NITER_MAX:
@@ -132,9 +154,9 @@ def damped_newton_solve(fun, x0, rtol=1e-9, ftol=1e-30, jacfun=None, warm_start_
           if convergenceMode==0: # the newton step norm must decrease
               new_dx  = scipy.linalg.lu_solve(LUdec, new_res)
               nLUsolve+=1
-              new_dx_norm = np.linalg.norm(new_dx)
-              new_res_norm = np.linalg.norm(new_res)
-              custom_print('\t ||new dx||={:.3e}'.format(new_dx_norm))
+              new_dx_norm = np.linalg.norm(new_dx, ord=NORM_ORD)
+              new_res_norm = np.linalg.norm(new_res, ord=NORM_ORD)
+              custom_print('\t ||new dx||={:.3e}, ||new res||={:.3e}'.format(new_dx_norm, new_res_norm))
               if new_dx_norm < dx_norm:
                   custom_print('\tstep decrease is satisfying ({:.3e}-->{:.3e} with damping={:.3e})'.format(dx_norm, new_dx_norm, tau))
                   bAcceptedStep=True
@@ -142,7 +164,7 @@ def damped_newton_solve(fun, x0, rtol=1e-9, ftol=1e-30, jacfun=None, warm_start_
                       custom_print('slow ||dx|| convergence (ratio is {:.2e})) --> asking for jac udpate'.format(new_dx_norm/dx_norm))
                       bUpdateJacobian = True
           elif convergenceMode==1: # the residual vector norm must decrease
-              new_res_norm = np.linalg.norm(new_res)
+              new_res_norm = np.linalg.norm(new_res, ord=NORM_ORD)
               new_dx, new_dx_norm = None, None
               custom_print('\t ||new res||={:.3e}'.format(new_res_norm))
               if new_res_norm < res_norm:
@@ -158,7 +180,8 @@ def damped_newton_solve(fun, x0, rtol=1e-9, ftol=1e-30, jacfun=None, warm_start_
         if bAcceptedStep:
             custom_print('\tdamped step accepted (tau={:.3e})'.format(tau))
             x = new_x
-            if x.size<5:
+            bJacobianAlreadyUpdated=False # we have not yet computed the Jacobian for the new value of x
+            if bStoreIterates:
               x_hist.append(np.copy(x))
             tau_hist.append(tau)
             if new_dx is None: # if it has not yet been updated (e.g when using a residual norm criterion)
@@ -169,11 +192,15 @@ def damped_newton_solve(fun, x0, rtol=1e-9, ftol=1e-30, jacfun=None, warm_start_
             nfev+=1
             dx  = scipy.linalg.lu_solve(LUdec, res)
             nLUsolve+=1
-            dx_norm = np.linalg.norm(dx)
-            res_norm = np.linalg.norm(res)
+            dx_norm = np.linalg.norm(dx, ord=NORM_ORD)
+            res_norm = np.linalg.norm(res, ord=NORM_ORD)
+
+
+            if tau<0.3:
+              custom_print('\t successful damping is considered too small --> jacobian will be updated')
 
             # TODO: Rank-1 update of the Jacobian ?
-            if tau==1. and not bUpdateJacobian: # no damping was applied, the Jacobian can be correctly updated
+            if 0:# tau==1. and not bUpdateJacobian: # no damping was applied, the Jacobian can be correctly updated
               # adapted from equation (1.60) of "A family of Newton Codes for Systems of Highly Nonlinear Equations" by Nowak and Deuflhard
               # --> seems to be useless in my test cases
               if dx_norm>1e-15:
@@ -181,11 +208,12 @@ def damped_newton_solve(fun, x0, rtol=1e-9, ftol=1e-30, jacfun=None, warm_start_
                 jac = jac + np.outer(res,dx)/dx_norm
                 LUdec = scipy.linalg.lu_factor(jac)
                 nlu  += 1
-              
+
+              bUpdateJacobian=True
             # TODO: increase tau if convergence rate was good ?
             tau = 1. #min((tau*10., 1.))
-            
-            
+
+
 
             if res_norm < ftol:
                 custom_print('residual norm has converged')
@@ -196,7 +224,7 @@ def damped_newton_solve(fun, x0, rtol=1e-9, ftol=1e-30, jacfun=None, warm_start_
         elif not bFailed:
             # the step is rejected, we must lower the damping or update the Jacobian
             # TODO: better damping strategy
-            tau = 0.33*tau
+            tau = 0.5*tau
             custom_print('\tstep rejected: reducing damping to {:.3e}'.format(tau))
             if tau < TAU_MIN: # damping is too small, indicating convergence issues
                 custom_print('\tdamping is too low')
@@ -205,12 +233,15 @@ def damped_newton_solve(fun, x0, rtol=1e-9, ftol=1e-30, jacfun=None, warm_start_
             if bFailed:
               custom_print('Failed after ', end='')
               ier=1
-              msg='failed'
+              nrank=np.linalg.matrix_rank(jac)
+              ndeficiency = nx-nrank
+              msg='failed (Jac_rank={} (deficiency: {}), Jac_cond={:.2e})'.format(nrank, ndeficiency, np.linalg.cond(jac))
             else:
               custom_print('Success after ', end='')
               ier=0
               msg='success'
             custom_print(' {} iters, with {} jac update, {} LU-factorisations'.format(niter, njev, nlu))
+            custom_print(msg)
             return x, \
                   {'niter': niter, 'njev': njev, 'nfev': nfev, 'nLUsolve':nLUsolve,
                    'nLUdec': nlu, 'dx_norm': dx_norm, 'res_norm': res_norm,

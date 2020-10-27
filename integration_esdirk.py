@@ -9,7 +9,8 @@ from damped_newton import damped_newton_solve
 
 NEWTONCHOICE=2 #0: Scipy's fsolve 1: Scipy's newton (bad !), 2: custom damped Newton
 
-def ERK_integration(fun, y0, t_span, nt, A, b, c, jacfun=None, bPrint=True, newtonchoice=NEWTONCHOICE):
+
+def ERK_integration(fun, y0, t_span, nt, A, b, c, bPrint=True):
     """ Performs the integration of the system dy/dt = f(t,y)
         from t=t_span[0] to t_span[1], with initial condition y(t_span[0])=y0.
         The RK method described by A,b,c is an explicit method
@@ -20,8 +21,6 @@ def ERK_integration(fun, y0, t_span, nt, A, b, c, jacfun=None, bPrint=True, newt
         - A      :  (2D-array)        Butcher table of the chosen RK method
         - b      :  (1D-array)        weightings for the quadrature formula of the RK methods
         - c      :  (1D-array)        RK substeps time
-
-        - jacfun  :  (function handle, optional) function returning a 2D-array (Jacobian df/dy)
         """
     assert y0.ndim==1, 'y0 must be 0D or 1D'
 
@@ -50,7 +49,7 @@ def ERK_integration(fun, y0, t_span, nt, A, b, c, jacfun=None, bPrint=True, newt
         Y[:,0]=unm1[:]
         K[:,0] = fun(tn+c[0]*dt, Y[:,0])
         ## compute each stage sequentially
-        for i in range(1,s): 
+        for i in range(1,s):
             # Yi = y0 + dt*sum_{j=1}^{i-1} a_{ij} f(Yj))$
               # Y[:,i] = unm1[:]
               # for j in range(i):
@@ -219,7 +218,7 @@ def FIRK_integration(fun, y0, t_span, nt, A, b, c, jacfun=None, bPrint=True, vec
 
 
 ########################################################################################
-def DIRK_integration(fun, y0, t_span, nt, A, b, c, jacfun=None, bPrint=True, newtonchoice=NEWTONCHOICE, fullDebug=False):
+def DIRK_integration(fun, y0, t_span, nt, A, b, c, jacfun=None, bPrint=True, newtonchoice=2, fullDebug=False):
     """ Performs the integration of the system dy/dt = f(t,y)
         from t=t_span[0] to t_span[1], with initial condition y(t_span[0])=y0.
         The RK method described by A,b,c may be explicit or diagonally-implicit.
@@ -252,6 +251,11 @@ def DIRK_integration(fun, y0, t_span, nt, A, b, c, jacfun=None, bPrint=True, new
     out.njev = 0
     infodict_hist = {} # additonal optional debug storage
     out.infodict_hist = infodict_hist
+
+    # de quoi itnerfacer le view newton
+    solver = newton.newtonSolverObj()
+    Dres, LU, Dresinv = None, None, None
+
     for it, tn in enumerate(t[:-1]):
         if bPrint:
           if np.mod(it,np.floor(nt/10))==0:
@@ -259,40 +263,46 @@ def DIRK_integration(fun, y0, t_span, nt, A, b, c, jacfun=None, bPrint=True, new
           if np.mod(it,np.floor(nt/100))==0:
               print('.', end='')
         for isub in range(s): # go through each substep
-            temp = np.zeros(np.shape(y0))
-            for j in range(isub):
-                temp    = temp  +  A[isub,j] * K[:,j]
-            vi = unm1 + dt*( temp )
+            # temp = np.zeros(np.shape(y0))
+            # for j in range(isub):
+            #     temp    = temp  +  A[isub,j] * K[:,j]
+            # vi = unm1 + dt*( temp )
+            vi = unm1[:] + dt * K[:,:isub].dot( A[isub,:isub] )
 
             if A[isub,isub]==0: # explicit step
                 kni = fun(tn+c[isub]*dt, vi)
             else:
                  # solve the complete non-linear system via a Newton method
                 tempfun = lambda kni: kni - fun(tn+c[isub]*dt, vi + dt*A[isub,isub]*kni)
+                if jacfun is None:
+                  gradRes = None
+                else:
+                  gradRes = lambda kni: np.eye(kni.shape[0]) - dt*A[isub,isub]*jacfun(tn+c[isub]*dt, vi + dt*A[isub,isub]*kni)
                 if newtonchoice==0:
                   kni = scipy.optimize.fsolve(func= tempfun,
                                         x0=K[:,0],
-                                        fprime=None,
+                                        fprime=gradRes,
                                         # band=(5,5), #gradFun
                                         # epsfcn = 1e-7,
                                         args=(),)
                 elif newtonchoice==1:
                   kni = scipy.optimize.newton(func= tempfun,
                                         x0=K[:,0],
-                                        fprime=None, maxiter=100,
+                                        fprime=gradRes, maxiter=100,
                                         # band=(5,5), #gradFun
                                         # epsfcn = 1e-7,
                                         rtol=1e-8,
                                         args=(),)
                 elif newtonchoice==2: # custom damped newton
-                    kni, infodict, warm_start_dict = damped_newton_solve(
-                        fun=tempfun, x0=K[:,0],rtol=1e-9, ftol=1e-30, jacfun=None, warm_start_dict=warm_start_dict,
-                        itmax=30, jacmax=10, tau_min=1e-4, convergenceMode=0)
+                    kni, infodict, warm_start_dict2 = damped_newton_solve(
+                        fun=tempfun, x0=K[:,0],rtol=1e-9, ftol=1e-30, jacfun=gradRes, warm_start_dict=warm_start_dict,
+                        itmax=50, jacmax=10, tau_min=1e-3, convergenceMode=0)
                     if infodict['ier']!=0: # Newton did not converge
+                      print('Newton did not converge')
                       # restart the Newton solve with all outputs enabled
                       kni, infodict, warm_start_dict = damped_newton_solve(
-                        fun=tempfun, x0=K[:,0],rtol=1e-9, ftol=1e-30, jacfun=None, warm_start_dict=warm_start_dict,
-                        itmax=30, jacmax=10, tau_min=1e-4, convergenceMode=0, bPrint=True)
+                        fun=tempfun, x0=K[:,0],rtol=1e-9, ftol=1e-30, jacfun=gradRes, warm_start_dict=warm_start_dict,
+                        itmax=50, jacmax=10, tau_min=1e-3, convergenceMode=0, bPrint=True)
                       # raise Exception('Newton did not converge: infodict={}'.format(infodict))
                       msg = 'Newton did not converge'
                       # raise Exception(msg)
@@ -300,6 +310,8 @@ def DIRK_integration(fun, y0, t_span, nt, A, b, c, jacfun=None, bPrint=True, new
                       out.t = t[:it+1]
                       out.message = msg
                       return out
+                    else:
+                      warm_start_dict=warm_start_dict2 # pour ne aps interférer avec le debug en cas de non-convergence
                     if fullDebug: # store additional informations about the Newton solve
                       if not bool(infodict_hist): # the debug dictionnary has not yet been initialised
                         for key in infodict.keys():
@@ -310,6 +322,21 @@ def DIRK_integration(fun, y0, t_span, nt, A, b, c, jacfun=None, bPrint=True, new
                           infodict_hist[key].append(infodict[key])
                     out.nfev += infodict['nfev']
                     out.njev += infodict['njev']
+                elif newtonchoice==3: # custom modified newton without damping
+#                    gradFun = lambda kni: 1 - dt*A[isub,isub]*gradF(tn+c[isub]*dt, vi + dt*A[isub,isub]*kni)
+                    kni, Dres, LU, Dresinv = solver.solveNewton(fun=tempfun,
+                                                x0=K[:,0],
+                                                initJac=Dres,
+                                                initLU=LU,
+                                                initInv=Dresinv,
+                                                jacfun=gradRes,
+                                                options={'eps':1e-8, 'bJustOutputJacobian':False, 'nIterMax':50, 'bVectorisedModelFun':False,
+                                                         'bUseComplexStep':False, 'bUseLUdecomposition':True, 'bUseInvertJacobian':False,
+                                                         'bModifiedNewton':True, 'bDampedNewton':False, 'limitSolution':None,
+                                                         'bDebug':False, 'bDebugPlots':False, 'nMaxBadIters':2, 'nMaxJacRecomputePerTimeStep':5} )
+                    out.nfev   = solver.nSolverCall
+                    out.njev = solver.nJacEval
+                    # out.nLUsolve = solver.nLinearSolve
                 else:
                     raise Exception('newton choice is not recognised')
             K[:,isub] = kni #fun(tn+c[isub]*dt, ui[:,isub])
@@ -321,6 +348,8 @@ def DIRK_integration(fun, y0, t_span, nt, A, b, c, jacfun=None, bPrint=True, new
     # END OF INTEGRATION
     out.y = y
     out.t = t
+    if bPrint:
+      print('done')
     return out
 
 
