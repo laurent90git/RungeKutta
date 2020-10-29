@@ -6,6 +6,7 @@ import copy
 import scipy.integrate
 import scipy.interpolate
 from damped_newton import damped_newton_solve
+import newton
 
 NEWTONCHOICE=2 #0: Scipy's fsolve 1: Scipy's newton (bad !), 2: custom damped Newton
 
@@ -459,7 +460,7 @@ if __name__=='__main__':
             elif mod=='ERK': # FIRK solve
                 A,b,c = rk_coeffs.getButcher(name=method)
                 sol = ERK_integration(fun=modelfun, y0=y0, t_span=[0., tf], nt=nt,
-                                            A=A, b=b, c=c, jacfun=None, bPrint=False)
+                                            A=A, b=b, c=c, bPrint=False)
             else:
                 raise Exception('mod {} is not recognised'.format(mod))
             sols.append(sol)
