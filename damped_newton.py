@@ -120,13 +120,22 @@ def damped_newton_solve(fun, x0, rtol=1e-9, ftol=1e-30, jacfun=None, warm_start_
             custom_print('\tupdating Jacobian')
             if bJacobianAlreadyUpdated:
               custom_print('\t/!\ the jacobian has already been computed for this value of x --> convergence seems impossible...')
-              # TODO: accept one step, no matter the increase in ||dx||
-              # scaled norm of ||dx|| ?
-              bFailed = True
+              # TODO: scaled norm of ||dx|| ?
+              if 0: # just fail
+                bFailed = True
+              else: # accept one step, no matter the increase in ||dx|| or ||res||
+                print('\t    --> forcing one step and retrying')
+                x = x - dx
+                res = fun(x) # initial residuals
+                nfev += 1
+                res_norm = np.linalg.norm(res, ord=NORM_ORD)
+                dx  = scipy.linalg.lu_solve(LUdec, res)
+                nLUsolve+=1
+                dx_norm = np.linalg.norm(dx, ord=NORM_ORD)
             elif njev > NJAC_MAX:
                 bFailed = True
                 custom_print('too many jacobian evaluations')
-            else:
+            else: # update jacobian and dx
               jac = jac_estimator(x)
               bUpdateJacobian = False
               bJacobianAlreadyUpdated=True
@@ -139,7 +148,7 @@ def damped_newton_solve(fun, x0, rtol=1e-9, ftol=1e-30, jacfun=None, warm_start_
               dx  = scipy.linalg.lu_solve(LUdec, res)
               nLUsolve+=1
               dx_norm = np.linalg.norm(dx, ord=NORM_ORD)
-              res_norm = np.linalg.norm(res, ord=NORM_ORD)
+              # res_norm = np.linalg.norm(res, ord=NORM_ORD)
 
         niter+=1
         if niter > NITER_MAX:
