@@ -278,7 +278,7 @@ def DIRK_integration(fun, y0, t_span, nt, A, b, c, jacfun=None, bPrint=True, new
                 if jacfun is None:
                   gradRes = None
                 else:
-                  gradRes = lambda kni: np.eye(kni.shape[0]) - dt*A[isub,isub]*jacfun(tn+c[isub]*dt, vi + dt*A[isub,isub]*kni)
+                  gradRes = lambda kni: scipy.sparse.csc_matrix( scipy.sparse.eye(kni.shape[0]) - dt*A[isub,isub]*jacfun(tn+c[isub]*dt, vi + dt*A[isub,isub]*kni) )
                 if newtonchoice==0:
                   kni = scipy.optimize.fsolve(func= tempfun,
                                         x0=K[:,0],
@@ -364,7 +364,7 @@ if __name__=='__main__':
     
     # mod ='FIRK'
     # method='Radau5'
-    mod ='DIRK'
+    mod ='FIRK'
     method='L-SDIRK-33'
     # mod = 'ERK'
     # method= 'rk4'
@@ -434,13 +434,13 @@ if __name__=='__main__':
     # methods = [('Radau5', 'FIRK')] #, ('Radau5', 'DIRK'), ('Radau5', 'ERK')]
     methods = [
                 ('Radau5', 'FIRK'), ('ESDIRK54A', 'DIRK'),
-                ('L-SDIRK-33', 'DIRK'),
-                # ('ESDIRK32A', 'DIRK'),
-                # ('ESDIRK43B', 'DIRK'),
-                ('IE', 'DIRK'),
-                ('IE', 'FIRK'),
-                ('EE', 'ERK'),
-                ('RK10', 'ERK'),
+                # ('L-SDIRK-33', 'DIRK'),
+                # # ('ESDIRK32A', 'DIRK'),
+                # # ('ESDIRK43B', 'DIRK'),
+                # ('IE', 'DIRK'),
+                # ('IE', 'FIRK'),
+                # ('EE', 'ERK'),
+                # ('RK10', 'ERK'),
                 ('RK4', 'ERK'),
                 ]
     fig_conv = plt.figure()

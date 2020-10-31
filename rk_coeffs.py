@@ -17,6 +17,8 @@ import numpy as np
 def getButcher(name):
   """ Donne le tableau de Butcher (A,b,c) de la méthode RK choisie  """
   name = name.upper()
+  
+  A,b,c,Ahat,bhat,chat,embedded=None,None,None,None,None,None,None
   if name=='IE': # Implicit Euler, L-stable stiffly accurate
     A= np.array([[1]])
     c= np.array([1])
@@ -188,14 +190,20 @@ def getButcher(name):
         assert np.allclose(b,A[-1,:])
         assert np.allclose(b_low,A[-2,:])
 
-#        b_low = A[-2,:] #bas ordre
-#        b     = A[-1,:] #ordre eleve
-#        d = b-b_low # poids pour l'estimation de l'erreur
+        b_low = A[-2,:] # low order  = penultimate stage
+        b     = A[-1,:] # high order = last stage
+        d = b-b_low # coefficients of the error
         p_low = 4 #ordre de la méthode bas ordre
         p_high = 5 #ordre de la méthode d'ordre élevé
         isub_high = 7 # le 4ème substep correspond au pas final de la méthode d'ordre élevé
         isub_low  = 6 # le 3ème substep correspond au pas final de la méthode d'ordre faible
-        embedded = { 'isub_high':isub_high, 'isub_low':isub_low, 'p_low':p_low, 'p_high':p_high, 'd':None}
+        embedded = {'mode': 0, # 0 if the error estimate is not available, 1 if it is the difference between two stages (easier for DAEs), 2 if it must be built separately
+                    'isub_high':isub_high, # index of the high order stage
+                    'isub_low':isub_low,   # index of the low order stage
+                    'p_low':p_low,         # order of the low order solution
+                    'p_high':p_high,       # order of the high order solution
+                    'd':None               # coefficients of the error estimate (if mode==2)
+                    }
 
   elif name=='ESDIRK54A-V4': #method of ordre 4 extracted from the Kvaerno 54a method
         A = np.zeros((6,6))
@@ -347,7 +355,11 @@ def getButcher(name):
 
   else:
     raise Exception('unknown integrator {}'.format(name))
-  return A,b,c #{'A':A, 'b':b, 'c':c}
+
+  return A,b,c
+  # return {'A':A, 'b':b, 'c':c,
+  #         'Ahat':Ahat, 'bhat':bhat, 'chat':chat, # for IMEX methods
+  #         'embedded':embedded}
 
 
 def RK10coeffs():
