@@ -271,7 +271,8 @@ class testPrecision:
         colors = ['tab:blue', 'tab:orange', 'tab:green', 'tab:red', 'tab:purple', 'tab:brown', 'tab:pink', 'tab:gray', 'tab:olive', 'tab:cyan']
         for i,name in enumerate(list_rk_names):
             print(name)
-            A,b,c = rk_coeffs.getButcher(name)
+            method = rk_coeffs.getButcher(name)
+            A,b,c = method['A'], method['b'], method['c']
             if np.size(b)>6:
               bSympy=False # c'est plus rapide d'éviter Sympy, on dirait qu'il n'arrive pas à calculer les détermiannts analytiquement...
             else:
@@ -299,19 +300,21 @@ class testPrecision:
         # ax.axis('equal')
 
 if __name__=='__main__':
+    # Setup warnings such that any problem with complex number raises an error
     import warnings
     warnings.simplefilter("error", np.ComplexWarning) #to ensure we are not dropping complex perturbations
 
+    # Choose the area of the complex plane that will be analysed
     # test = testPrecision(re_min=-100, re_max=100, im_min=0., im_max=100, n_re=1000, n_im=1001) # on aperçoit des formes intriguantes en terme d'iso-contour de précision
     # test = testPrecision(re_min=-10, re_max=10, im_min=-5, im_max=5, n_re=200, n_im=202)
     # test = testPrecision(re_min=-20, re_max=20, im_min=-20, im_max=20, n_re=200, n_im=202)
     # test = testPrecision(re_min=-3, re_max=3, im_min=-3, im_max=3, n_re=200, n_im=202)
     test = testPrecision(re_min=-6, re_max=6, im_min=-6, im_max=6, n_re=200, n_im=202)
 
-    #%%
-    # A,b,c = rk_coeffs.getButcher('rk4')
-    A,b,c = rk_coeffs.getButcher('Radau5')
-    # A,b,c = rk_coeffs.getButcher('RadauIIA-5')#'L-SDIRK-33') #SDIRK4()5L[1]SA-1')
+    #%% Show the precision and stability of a given RK method
+    method = rk_coeffs.getButcher('Radau5')
+    A,b,c = method['A'], method['b'], method['c']
+    
     # tracé du contour de la précision par rapport à l'exponentielle
     pprecision, pprecision2 = test.plotStabilityRegionRK(A,b,c)
     R, Rsym = test.computeStabilityFunction(A,b,c, bSympy=False)
@@ -360,14 +363,13 @@ if __name__=='__main__':
     names = ['ie', 'esdirk32a', 'radau5']#, 'ESDIRK43B', 'ESDIRK32A']
     for name in names:
         print(name)
-        A,b,c = rk_coeffs.getButcher(name)
+        method = rk_coeffs.getButcher(name)
+        A,b,c = method['A'], method['b'], method['c']
         if np.size(b)>6:
           bSympy=False # c'est plus rapide d'éviter Sympy, on dirait qu'il n'arrive pas à calculer les détermiannts analytiquement...
         else:
           bSympy=True
         polys.append( test.computeStabilityFunction(A,b,c, bSympy=bSympy) )
-
-
 
     # Tracé de l'évolution de la précision le long de l'axe réel
     z_vec = np.linspace(-6,8,10000)
@@ -412,7 +414,8 @@ if __name__=='__main__':
     names = ['esdirk54a', 'ESDIRK54A-V4']
     for name in names:
         print(name)
-        A,b,c = rk_coeffs.getButcher(name)
+        method = rk_coeffs.getButcher(name)
+        A,b,c = method['A'], method['b'], method['c']
         if np.size(b)>6:
           bSympy=False # c'est plus rapide d'éviter Sympy, on dirait qu'il n'arrive pas à calculer les détermiannts analytiquement...
         else:

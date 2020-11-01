@@ -64,14 +64,16 @@ if __name__=='__main__':
   # Test of the model
   import matplotlib.pyplot as plt
   from scipy.integrate import solve_ivp
-  prob = brusselator_1d(alpha=0.02,nx=128)
+  # prob = brusselator_1d(alpha=0.02,nx=128)
+  prob = brusselator_1d(nx=128)
   sol = solve_ivp(fun=prob.fcn, y0=prob.init(), t_span=[0.,2.], t_eval=None,
                   method='Radau', atol=1e-4, rtol=1e-4, band=(4,4))
   u = sol.y[::2,:]
   v = sol.y[1::2,:]
   
   fig, ax = plt.subplots(2,1,sharex=True)
-  for i in range(0,len(sol.t),5):
+  # for i in range(0,len(sol.t),5):
+  for i in [-1]:
     ax[0].plot(prob.x, u[:,i])
     ax[1].plot(prob.x, v[:,i])
   ax[0].grid()

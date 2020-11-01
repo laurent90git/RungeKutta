@@ -43,7 +43,7 @@ def _validate_jac(y0,fun_vectorized,atol=1e-8,jac=None,sparsity=None):
 
       def jac_wrapped(y):
           f = fun_vectorized(y)
-          t=None
+          t=None # Scipy's numjac method assumes time is a separate variable
           global jac_factor # TODO: object oriented implementation of the Newton solver ?
           J, jac_factor = num_jac(fun=lambda t,y: fun_vectorized(y), t=t, y=y, f=f, threshold=atol,
                                   factor=jac_factor, sparsity=sparsity)
@@ -80,12 +80,16 @@ def _validate_jac(y0,fun_vectorized,atol=1e-8,jac=None,sparsity=None):
 
 def damped_newton_solve(fun, x0, rtol=1e-9, ftol=1e-30, jacfun=None, warm_start_dict=None,
                         itmax=30, jacmax=10, tau_min=1e-4, convergenceMode=0, jac_sparsity=None,
-                        vectorized=False,     bPrint=False):
+                        vectorized=False,     bPrint=False, bStoreIterates=False):
     if bPrint:
       custom_print = print
     else:
       def custom_print(*args, end=''):
         pass
+
+    njev=0
+    nlu=0
+
 
     # recover previously computed Jacobian, Lu decomposition, jacobian estimation method
     if warm_start_dict:
@@ -111,7 +115,9 @@ def damped_newton_solve(fun, x0, rtol=1e-9, ftol=1e-30, jacfun=None, warm_start_
 
     if jacfun:
         jac_estimator = jacfun
-        jac = jac_estimator(x0)
+        if jac is None:
+          jac = jac_estimator(x0)
+          njev+=1
     elif jac_estimator is None:
         print('analyzing jacobian sparisty pattern')
         global ncalls
@@ -131,6 +137,7 @@ def damped_newton_solve(fun, x0, rtol=1e-9, ftol=1e-30, jacfun=None, warm_start_
         ncalls = 0
         
         jac_estimator, jac = _validate_jac(y0=x0,fun_vectorized=fun_vectorized,atol=1e-8,jac=None,sparsity=jac_sparsity)
+        njev+=1
 
     if issparse(jac):
         def lu(A):
@@ -157,10 +164,8 @@ def damped_newton_solve(fun, x0, rtol=1e-9, ftol=1e-30, jacfun=None, warm_start_
     NORM_ORD = None
 
     nx = x0.size
-    bStoreIterates = (nx<=5)
+    
 
-    njev=1
-    nlu=0
     tau_hist=[]
     x_hist=[]
 
@@ -339,7 +344,7 @@ def damped_newton_solve(fun, x0, rtol=1e-9, ftol=1e-30, jacfun=None, warm_start_
 if __name__=='__main__':
     import matplotlib.pyplot as plt
     print('=== testing the damped Newton solver ===\n')
-    nprob=3 # choice of the test problem
+    nprob=0 # choice of the test problem
 
     if nprob==0: # non-linear problem, with potential divergence if undamped
       def funplot(x):
@@ -392,7 +397,8 @@ if __name__=='__main__':
 
     jacfun=None
     root, infodict, warm_start_dict = damped_newton_solve(fun=fun, x0=x0, rtol=1e-8, ftol=1e-30,
-                                                          jacfun=jacfun, warm_start_dict=None, bPrint=True)
+                                                          jacfun=jacfun, warm_start_dict=None, bPrint=True,
+                                                          bStoreIterates=True)
     # root, converged, zero_der = scipy.optimize.newton(func=fun, x0=x0,
     #                                                         rtol=1e-8, tol=1e-15,  maxiter=100,
     #                                                         full_output=True,  fprime=None, fprime2=None)

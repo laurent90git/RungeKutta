@@ -9,10 +9,14 @@ List of Runge-Kutta methods:
   singly diagonally implicit (SDIRK)
   singly diagonally implicit with an explicit first stage (ESDIRK)
   fully implicit (FIRK)
+  implicit-explicit (IMEX)
 
 @author: laurent.francois@polytechnique.edu
 """
 import numpy as np
+
+AVAILABLE_METHODS = ['IE', 'EE', 'CRKN', 'L-SDIRK-22-QZ', 'L-SDIRK-43', 'L-SDIRK-33', 'ESDIRK32A-3', 'ESDIRK32A-2', 'RK45', 'RK23',
+                     'ESDIRK32A', 'ESDIRK43B', 'ESDIRK54A', 'ESDIRK54A-V4', 'RADAUIA-5', 'RADAUIIA-5', 'SDIRK4()5L[1]SA-1', 'SDIRK4()5L[1]SA-2']
 
 def getButcher(name):
   """ Donne le tableau de Butcher (A,b,c) de la méthode RK choisie  """
@@ -23,15 +27,18 @@ def getButcher(name):
     A= np.array([[1]])
     c= np.array([1])
     b= np.array([1])
+    strType = "ERK"
   elif name=='EE': # Explicit Euler
     A= np.array([[0]])
     c= np.array([0])
     b= np.array([1])
+    strType = "ERK"
   elif name=='CRKN': # Crank-Nicolson
     A= np.array([[0, 0],
                  [0, 1]])
     c= np.array([0, 1])
     b= np.array([1/2, 1/2])
+    strType = "ESDIRK"
   elif name=='L-SDIRK-22-QZ': #Qin and Zhang
     # not stiffly accurate, but L-stable
     x = 1+np.sqrt(2)/2
@@ -40,6 +47,7 @@ def getButcher(name):
                  [1-x, x]])
     c= np.array([x, 1])
     b= np.array([1/2, 1/2])
+    strType = "SDIRK"
   elif name=='RK4':
     A= np.array([[0,0,0,0],
                  [1/2, 0, 0, 0],
@@ -48,9 +56,54 @@ def getButcher(name):
                  ])
     c= np.array([0, 1/2, 1/2, 1.])
     b= np.array([1/6, 1/3, 1/3, 1/6])
+    strType = "ERK"
   elif name=='RK10':
-    A,b,c = RK10coeffs()
-
+    A,b,c, embedded = RK10coeffs()
+    strType = "ERK"
+  elif name=="HEUN-EULER": # order 2 adaptive explicit
+    A= np.array([[0, 0],
+                 [1, 0]])
+    c= np.array([0,1])
+    b= np.array([1/2, 1/2])
+    strType = "ERK"
+    embedded = {'mode': 2, # 0 if the error estimate is not available, 1 if it is the difference between two stages (easier for DAEs), 2 if it must be built separately
+                'error_order':1, # order of the error estimate
+                'd':np.array([1,0])-b  # coefficients of the error estimate (if mode==2)
+                }
+  elif name=="RK23" or name=="Bogacki–Shampine".upper(): # order 3 adaptive explicit
+    A= np.array([[0, 0, 0, 0],
+                 [1/2, 0, 0, 0],
+                 [0, 3/4, 0, 0],
+                 [2/9, 1/3, 4/9, 0]])
+    c= np.array([0,1/2,3/4,1])
+    b= np.array([2/9,1/3,4/9,0])
+    strType = "ERK"
+    embedded = {'mode': 2, # 0 if the error estimate is not available, 1 if it is the difference between two stages (easier for DAEs), 2 if it must be built separately
+                'error_order':2, # order of the error estimate
+                'd':np.array([5/72, -1/12, -1/9, 1/8])  # coefficients of the error estimate (if mode==2)
+                }
+    
+  elif name=="RK45":
+    A = np.array([
+          [0,   0, 0, 0, 0, 0, 0],
+          [1/5, 0, 0, 0, 0, 0, 0],
+          [3/40, 9/40, 0, 0, 0, 0, 0],
+          [44/45, -56/15, 32/9, 0, 0, 0, 0],
+          [19372/6561, -25360/2187, 64448/6561, -212/729, 0, 0, 0],
+          [9017/3168, -355/33, 46732/5247, 49/176, -5103/18656, 0, 0],
+          [35/384, 0, 500/1113, 125/192, -2187/6784, 11/84, 0]
+        ])
+    b = np.array([35/384, 0, 500/1113, 125/192, -2187/6784, 11/84, 0])
+    c = np.array([0, 1/5, 3/10, 4/5, 8/9, 1, 1])
+    
+    embedded = {'mode': 2, # 0 if the error estimate is not available, 1 if it is the difference between two stages (easier for DAEs), 2 if it must be built separately
+                'error_order':4, # order of the error estimate
+                'd':np.array([-71/57600, 0, 71/16695, -71/1920, 17253/339200, -22/525, 1/40])  # coefficients of the error estimate (if mode==2)
+                }
+    strType = "ERK"
+    
+  
+   
   elif name=='L-SDIRK-43': # L-Stable, stiffly accurate, 4 stages, 3 order, SDIRK method
     A = np.array([[1/2,   0,  0,   0],
                   [1/6,  1/2, 0,   0],
@@ -59,6 +112,7 @@ def getButcher(name):
                 ])
     c = np.array([1/2, 2/3, 1/2, 1])
     b = A[-1,:]
+    strType = "SDIRK"
   elif name=='L-SDIRK-33': # L-Stable, stiffly accurate, 3 stages, 3 order, SDIRK method
     x = 0.4358665215
     A= np.array([ [x,                                  0,              0],
@@ -67,8 +121,8 @@ def getButcher(name):
                 ])
     c= np.array([x, (1+x)/2, 1])
     b= A[-1,:]
-
-  elif name== 'ESDIRK32-3': # stiffly accurate
+    strType = "SDIRK"
+  elif name== 'ESDIRK32A-3': # stiffly accurate
     # méthode d'ordre 3 extraite de la méthode embedded ESDIRK 32 avec 4 stages
     # taken from A FAMILY OF ESDIRK INTEGRATION METHODS
     # JOHN BAGTERP JØRGENSEN ∗, MORTEN RODE KRISTENSEN , AND
@@ -81,8 +135,8 @@ def getButcher(name):
                 ])
     c= np.array([0, 2*gamma, 1, 1])
     b= A[-1,:]
-
-  elif name== 'ESDIRK32-2': # stiffly accurate
+    strType = "ESDIRK"
+  elif name== 'ESDIRK32A-2': # stiffly accurate
     # méthode d'ordre 2 extraite de la méthode embedded ESDIRK 32 avec 4 stages
     # taken from A FAMILY OF ESDIRK INTEGRATION METHODS
     # JOHN BAGTERP JØRGENSEN ∗, MORTEN RODE KRISTENSEN , AND
@@ -94,7 +148,7 @@ def getButcher(name):
                 ])
     c= np.array([0, 2*gamma, 1])
     b= A[-1,:]
-
+    strType = "ESDIRK"
   elif name=='ESDIRK32A': #embedded method
     gamma = 0.4358665215
     gamma = 0.4358665215
@@ -114,7 +168,8 @@ def getButcher(name):
     isub_high = 4 # le 4ème substep correspond au pas final de la méthode d'ordre élevé
     isub_low  = 3 # le 3ème substep correspond au pas final de la méthode d'ordre faible
     embedded = { 'isub_high':isub_high, 'isub_low':isub_low, 'p_low':p_low, 'p_high':p_high , 'd':d}
-
+    strType = "ESDIRK"
+    
   elif name=='ESDIRK43B': #embedded method
     A= np.array([ [0, 0, 0, 0, 0],
                   [0.43586652150846, 0.43586652150846, 0, 0, 0],
@@ -133,7 +188,7 @@ def getButcher(name):
     isub_high = 5 # le 4ème substep correspond au pas final de la méthode d'ordre élevé
     isub_low  = 4 # le 3ème substep correspond au pas final de la méthode d'ordre faible
     embedded = { 'isub_high':isub_high, 'isub_low':isub_low, 'p_low':p_low, 'p_high':p_high , 'd':d}
-
+    strType = "ESDIRK"
   elif name=='ESDIRK54A': #embedded method (Kvaerno 2004, but coeffs found in arkcode butcher)
         # 7 stages, orders 5 and 4, both stiffly accurate
         A = np.zeros((7,7))
@@ -204,7 +259,7 @@ def getButcher(name):
                     'p_high':p_high,       # order of the high order solution
                     'd':None               # coefficients of the error estimate (if mode==2)
                     }
-
+        strType = "ESDIRK"
   elif name=='ESDIRK54A-V4': #method of ordre 4 extracted from the Kvaerno 54a method
         A = np.zeros((6,6))
         b = np.zeros(6)
@@ -243,7 +298,7 @@ def getButcher(name):
         c[4] = 0.436393609858648
         c[5] = 1.0
         assert(np.all(b==A[-1,:]))
-
+        strType = "ESDIRK"
   
   elif name=='RADAUIA-5':
       A = np.zeros((3,3))
@@ -261,7 +316,7 @@ def getButcher(name):
       
       b = np.array([1/9, 4/9 + (6**0.5)/36, 4/9 - (6**0.5)/36])
       c = np.array([0, 3/5-(6**0.5)/10, 3/5+(6**0.5)/10])
-      
+      strType = "IRK"      
   elif name=='RADAUIIA-5' or name=='RADAU5':
       A = np.zeros((3,3))
       r6 = 6**0.5
@@ -279,6 +334,7 @@ def getButcher(name):
       
       b = A[-1,:]
       c = np.array([2/5 -r6/10, 2/5+r6/10, 1.])
+      strType = "IRK"      
 
   elif name=='SDIRK4()5L[1]SA-1': # review nasa diagonally implicit RK, page 95, table 22
       coeff = 1
@@ -303,6 +359,8 @@ def getButcher(name):
 
       b[:] = A[-1,:]
       c = np.array([1/4, (2-coeff*(2**0.5))/4, (13+coeff*8*(2**0.5))/41, (41+coeff*9*(2**0.5))/49, 1.])
+      strType = "SDIRK"      
+      
   elif name=='SDIRK4()5L[1]SA-2':
       coeff = -1
       A = np.zeros((5,5))
@@ -326,7 +384,8 @@ def getButcher(name):
 
       b[:] = A[-1,:]
       c = np.array([1/4, (2-coeff*(2**0.5))/4, (13+coeff*8*(2**0.5))/41, (41+coeff*9*(2**0.5))/49, 1.])
-
+      strType = "SDIRK"      
+      
   elif name=='ESDIRK5(4I)8L[2]SA':
       raise Exception("j'ai du me trompé dans cette méthode, car même sur burgers simple, elle CV à l'odre 1")
       # ESdirk method, stiffly accurate, Diagonally Implicit Runge-Kutta Methods for Ordinary Differential Equations. A Review       by Christopher A. Kennedy
@@ -352,18 +411,136 @@ def getButcher(name):
 
       b[:] = A[-1,:]
       c = np.array([0, 1/2, (2+np.sqrt(2))/4, 53/100, 4/5, 17/25, 1, 1])
+      strType = "SDIRK"      
+      
+  #################
+  ##### IMEX ######
+  #################
+  elif name=='LDIRK222':
+    gamma = (2-2**0.5)/2
+    delta = 1-1/(2*gamma)
+    A = np.array([  
+                  [gamma, 0],
+                  [1-gamma, gamma],
+                  ])
+    b = np.array([1-gamma, gamma])
+    c=np.array([gamma, 1])
+    #A,b,c = expandImplicitTableau(A,b,c)
+    Ahat=np.array([[0,0,0],
+                   [gamma, 0, 0],
+                   [delta, 1-delta, 0],
+                   ])
+    bhat=np.array([delta, 1-delta, 0])
+    chat=np.array([0, gamma, 1])
+    strType = "IMEX"
 
+  elif name=='FBeuler111':
+    A = np.array([[1]])
+    b = np.array([1])
+    c=np.array([1])
+    #A,b,c = expandImplicitTableau(A,b,c)
+
+    Ahat=np.array([[0,0],
+                   [1,0]])
+    bhat=np.array([1,0])
+    chat=np.array([0,1])
+    strType = "IMEX"
+    
+  elif name=='DIRK121':
+    A = np.array([[1]])
+    b = np.array([1])
+    c=np.array([1])
+    #A,b,c = expandImplicitTableau(A,b,c)
+
+    Ahat=np.array([[0,0],
+                   [1,0]])
+    bhat=np.array([0,1])
+    chat=np.array([0,1])
+    strType = "IMEX"
+    
+  elif name=='DIRK122':
+    A = np.array([  
+                  [1/2],
+                  ])
+    b = np.array([1])
+    c=np.array([1/2])
+    #A,b,c = expandImplicitTableau(A,b,c)
+    Ahat=np.array([[0,0],
+                   [1/2, 0],
+                   ])
+    bhat=np.array([0, 1])
+    chat=np.array([0, 1/2])
+    strType = "IMEX"
+    
+  elif name=='LDIRK232':
+    gamma = (2-2**0.5)/2
+    delta = -2*(2**0.5)/3
+    A = np.array([[gamma, 0],
+                  [1-gamma, gamma]])
+    b = np.array([1-gamma, gamma])
+    c = np.array([gamma, 1])
+    #A,b,c = expandImplicitTableau(A,b,c)
+
+    Ahat=np.array([[0,0,0],
+                   [gamma,0,0],
+                   [delta, 1-delta, 0]])
+    bhat=np.array([0, 1-gamma, gamma])
+    chat=np.array([0, gamma, 1])
+    strType = "IMEX"
+    
+  elif name=='DIRK233':
+    gamma = (3+3**0.5)/6
+    A = np.array([  
+                  [gamma, 0],
+                  [1-2*gamma, gamma],
+                  ])
+    b = np.array([1/2, 1/2])
+    c=np.array([gamma, 1-gamma])
+    #A,b,c = expandImplicitTableau(A,b,c)
+    Ahat=np.array([[0,0,0],
+                   [gamma, 0, 0],
+                   [gamma-1, 2*(1-gamma), 0],
+                   ])
+    bhat=np.array([0, 1/2, 1/2])
+    chat=np.array([0, gamma, 1-gamma])
+    strType = "IMEX"
+
+  elif name=='LDIRK343':
+    gamma = 0.4358665215
+    A = np.array([  
+                  [gamma,                           0,                               0],
+                  [(1-gamma)/2,                     gamma,                           0],
+                  [-3/2*gamma**2 + 4*gamma - 1/4,    3/2*gamma**2 - 5*gamma + 5/4,   gamma ],
+                  ])
+    b = A[-1,:]
+    c=np.array([gamma, (1+gamma)/2, 1])
+    #A,b,c = expandImplicitTableau(A,b,c)
+    Ahat=np.array([[0,0,0,0],
+                   [0.4358665215, 0, 0, 0],
+                   [0.3212788860, 0.3966543747, 0, 0],
+                   [-0.105858296, 0.5529291479, 0.5529291479, 0],
+                   ])
+    bhat=np.array([0, 1.208496649, -0.644363171, 0.4358665215])
+    chat=np.array([0, 0.4358665215, 0.7179332608, 1.])
+    strType = "IMEX"
   else:
     raise Exception('unknown integrator {}'.format(name))
-
-  return A,b,c
-  # return {'A':A, 'b':b, 'c':c,
-  #         'Ahat':Ahat, 'bhat':bhat, 'chat':chat, # for IMEX methods
-  #         'embedded':embedded}
-
+	
+  assert not (A is None)
+  assert not (b is None)
+  assert not (c is None)
+  assert not (strType is None)
+  
+  assert A.shape[0]==A.shape[1], 'A must be square'
+  assert b.size==A.shape[1]
+  assert c.size==A.shape[1]
+  method = {'A':A, 'b':b, 'c':c, 'Ahat': Ahat, 'bhat': bhat, 'chat':chat, 'embedded': embedded, 'isEmbedded': not (embedded is None)}
+  return method
+  # return A,b,c
 
 def RK10coeffs():
     #The coefficients have been obtained from https://sce.uhcl.edu/rungekutta/rk108.txt
+	# TODO: local error estimate = (1/360)  h ( f(t1,x1)-f(t15,x15) )
     c = np.array([
       0.000000000000000000000000000000000000000000000000000000000000,
       0.100000000000000000000000000000000000000000000000000000000000,
@@ -556,4 +733,60 @@ def RK10coeffs():
             j = int(temp2[1])
             value = float(temp2[2])
             A[k,j] = value
-    return A,b,c
+    embedded=None
+    return A,b,c,embedded
+  
+def checkOrderConditions(name):
+  """ Méthode pour tester les conditions d'ordre, dans le cas particulier du cours de Marc """
+  method = getButcher(name)
+  A,b,c = method['A'], method['b'], method['c'] # Butcher coefficients
+  s = b.size
+
+  if c[0] != 0:
+    print('incompatible with the order conditions formula (c[0]!=0)')
+    return np.nan
+  if not np.all( abs(np.sum(A,axis=1) - c) <1e-14 ):
+    print('method is not consitent')
+    return 0
+  # ordre 1
+  if not np.abs( np.sum(b) - 1)<1e-14:
+    print('failed order 1')
+    return 0
+
+  # ordre 2
+  if not np.abs( b.dot(c) - 1/2)<1e-14:
+    print('failed order 2')
+    return 1
+
+  # ordre 3
+  if not np.abs( b.dot(c**2) - 1/3)<1e-14:
+    print('failed order 3')
+    return 2
+  if not np.abs( A.dot(c).dot(b) - 1/6)<1e-14:
+    print('failed order 3')
+    return 2
+  
+  # ordre 4
+  if not np.abs( b.dot(c**3) - 1/4)<1e-14:
+    print('failed order 4')
+    return 3
+  if not np.abs( (b*c).dot(A.dot(c)) - 1/8)<1e-14:
+    print('failed order 4')
+    return 3
+  if not np.abs( b.dot(A.dot(c**2)) - 1/12)<1e-14:
+    print('failed order 4')
+    return 3
+  if not np.abs( b.dot( A.dot(A.dot(c)) ) - 1/24)<1e-14:
+    print('failed order 4')
+    return 3
+
+  print('order is >= 4')
+  return 4
+  # TODO: generic order conditions
+  
+  
+if __name__=='__main__':
+  print('Checking orders of available RK methods')
+  for method in AVAILABLE_METHODS:
+    print('{}: '.format(method), end='')
+    checkOrderConditions(method)
