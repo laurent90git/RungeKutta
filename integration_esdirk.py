@@ -110,7 +110,7 @@ def ERK_adapt_integration(fun, y0, t_span, method, atol=1e-6, rtol=1e-6, first_s
           # compute the factor by which delta_t is to be multiplied to obtain err~1
           # a safety factor < 1 is used to ensure the new delta t leads to err < 1
           # bounds are also applied on the factor so that the time step does not change to aggressively
-          factor = min(5, max(0.2, 0.9*(1/err)**(1/(error_order+1)) ))
+          factor = min(10, max(0.2, 0.9*(1/err)**(1/(error_order+1)) ))
           dt_opt = dt*factor
           if err>1:
             dt=dt_opt
@@ -335,6 +335,18 @@ def FIRK_integration(fun, y0, t_span, nt, method, jacfun=None, bPrint=True, vect
               else: # backup already initialised
                 for key in infodict_hist.keys():
                   infodict_hist[key].append(infodict[key])
+        elif newtonchoice==4:
+            y_substeps = scipy.optimize.newton_krylov(F=lambda x: resfun(Y=x,y0=unm1, tn=tn, dt=dt, A=At, n=n, s=s),
+                                                      xin=np.copy(yini), iter=None, rdiff=1e-8,
+                                                      method='lgmres',
+                                                      inner_maxiter=20, inner_M=None,
+                                                      outer_k=10,
+                                                      verbose=True,
+                                                      maxiter=None,
+                                                      f_tol=1e-20, f_rtol=1e-8,
+                                                      x_tol=1e-9, x_rtol=1e-9,
+                                                      tol_norm=None,
+                                                      line_search='armijo', callback=None)
         else:
             raise Exception('newton choice is not recognised')
         K[:,:] = fun_vectorised(tn+c*dt, y_substeps.reshape((n,s), order='F'))
@@ -354,6 +366,7 @@ def FIRK_integration(fun, y0, t_span, nt, method, jacfun=None, bPrint=True, vect
     # END OF INTEGRATION
     out.y = y
     out.t = t
+    out.y_substeps = y_substeps # last substeps
     return out
 
 
@@ -502,15 +515,16 @@ if __name__=='__main__':
     #### PARAMETERS ####
     problemtype = 'stiff'
     
+    NEWTONCHOICE=3
     # mod ='FIRK'
     # name='Radau5'
-    # mod ='FIRK'
-    # name='L-SDIRK-33'
+    mod ='DIRK'
+    name='L-SDIRK-33'
     # mod = 'ERK'
     # name= 'rk4'
-    mod = 'adapt_ERK'
+    # mod = 'adapt_ERK'
     # name='RK23'
-    name='RK45'
+    # name='RK45'
     # name='Heun-Euler'
     
     ### Setup and solve the problem

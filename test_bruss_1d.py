@@ -15,10 +15,10 @@ from bruss_1D import brusselator_1d
 ### SETUP MODEL ###
 xmin = 0
 xmax = 4
-nx = 100
+nx = 1000
 dx = (xmax-xmin)/(nx+1)
 x = np.linspace(xmin+dx, xmax-dx, nx)
-bz1d = brusselator_1d(nx=128)
+bz1d = brusselator_1d(nx=nx)
 fcn = bz1d.fcn
 yini = bz1d.init()
 nvar=2

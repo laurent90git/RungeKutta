@@ -143,8 +143,8 @@ class testPrecision:
         pprecision2 = 100*np.abs((RR-expp)/RR) # précision en pourcents par rapport à la solution numérique
 
         # map_levels = np.linspace(-5,5,50)
-        # map_levels = np.linspace(-6,6,50)
-        map_levels = np.linspace(-3,3,50)
+        map_levels = np.linspace(-5,4,20)
+        # map_levels = np.linspace(-3,3,50)
         # map_levels = np.hstack((-99, map_levels, 99))
         cmap=None
         # for cmap in  [
@@ -163,17 +163,20 @@ class testPrecision:
 
             # contour de la précision relative
             cs = ax.contourf(xx,yy, np.log10(pprecision), levels=map_levels, cmap=cmap) #, cmap = 'gist_earth')
-            fig.colorbar(cs)
+            fig.colorbar(cs, format='%.2f')
 
             # add contour lines for precision
             # levels = np.round(np.logspace(0,2,5)).astype(int)
             levels = np.array( range(0,200,25) )
             # levels = np.array([1,5,25,50,100,500]) #np.array(range(0,200,25))
             level_contour = ax.contour(xx,yy, pprecision, levels=levels, colors='k')
-            ax.clabel(level_contour, inline=1, fontsize=10,  fmt='%1.0f')
+            ax.clabel(level_contour, inline=1, fontsize=10,  fmt='%0.2f')
 
             ## Axis description
-            fig.suptitle(f'Domaine de stabilité (rouge), iso-contour de précision (%)\n et map de la précision (log10), erreur {name}')
+            # fig.suptitle(f'Domaine de stabilité (rouge), iso-contour de précision (%)\n et map de la précision (log10), erreur {name}')
+            
+            fig.suptitle(r"""Contours of the relative precision (log10) wrt the exponential solution for $y^{\prime} = \lambda y$
+                             Order stars (blue), stability domaine (red)""")#", erreur {}""".format(name))
             ax.set_xlabel(r'Re$(\lambda\Delta t)$')
             ax.set_ylabel(r'Im$(\lambda\Delta t)$')
 
@@ -188,7 +191,7 @@ class testPrecision:
             ax.contour(xx,yy,rr,levels=[0,1],colors='r')
 
             # hachurer en rouge la zone instable
-            if 1:
+            if 0:
               rr_sup_1 = np.where(np.abs(rr) >= 1)
               temp = np.zeros_like(rr)
               temp[rr_sup_1] = 1.
@@ -199,11 +202,12 @@ class testPrecision:
 
             # add order star
             order_star = np.abs(RR)/np.abs(expp)
-            plt.rcParams['hatch.color']='b'  # seul moyen que j'ai trouvé pour avoir des hachures colorées...
             cs   = ax.contour(xx,yy, order_star, colors='b', levels=[0.,1.])
-            cs   = ax.contourf(xx,yy, order_star, levels=[0., 1.0, 1.5],
-                              hatches=[None,'\\\\',None], alpha = 0.)
-            plt.rcParams['hatch.color']=[0,0,0]
+            if 0:
+                plt.rcParams['hatch.color']='b'  # seul moyen que j'ai trouvé pour avoir des hachures colorées...
+                cs   = ax.contourf(xx,yy, order_star, levels=[0., 1.0, 1.5],
+                                  hatches=[None,'\\\\',None], alpha = 0.)
+                plt.rcParams['hatch.color']=[0,0,0]
 
 
             # ax.axis('equal')

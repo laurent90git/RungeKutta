@@ -15,8 +15,11 @@ List of Runge-Kutta methods:
 """
 import numpy as np
 
-AVAILABLE_METHODS = ['IE', 'EE', 'CRKN', 'L-SDIRK-22-QZ', 'L-SDIRK-43', 'L-SDIRK-33', 'ESDIRK32A-3', 'ESDIRK32A-2', 'RK45', 'RK23',
-                     'ESDIRK32A', 'ESDIRK43B', 'ESDIRK54A', 'ESDIRK54A-V4', 'RADAUIA-5', 'RADAUIIA-5', 'SDIRK4()5L[1]SA-1', 'SDIRK4()5L[1]SA-2']
+implicit_methods = ['IE', 'CRKN', 'L-SDIRK-22-QZ', 'L-SDIRK-43', 'L-SDIRK-33', 'ESDIRK32A-3', 'ESDIRK32A-2',
+                    'ESDIRK32A', 'ESDIRK43B', 'ESDIRK54A', 'ESDIRK54A-V4', 'RADAUIA-5', 'RADAUIIA-5',
+                    'SDIRK4()5L[1]SA-1', 'SDIRK4()5L[1]SA-2']
+explicit_methods = ['EE' , 'RK45', 'RK23']
+AVAILABLE_METHODS = implicit_methods + explicit_methods
 
 def getButcher(name):
   """ Donne le tableau de Butcher (A,b,c) de la méthode RK choisie  """
@@ -736,6 +739,19 @@ def RK10coeffs():
     embedded=None
     return A,b,c,embedded
   
+def checkStageOrderConditions(name)  :
+  """ Checks what the maximum stage order is """
+  method = getButcher(name)
+  A,b,c = method['A'], method['b'], method['c'] # Butcher coefficients
+  s = b.size
+  for i in range(s): # go through each stage sequentially
+    for k in range(1,2*s+3): # find the order of this stage
+      LHS = A[i,:].dot(c**(k-1))
+      RHS = (c[i]**k) / k
+      if not np.allclose(LHS, RHS):
+        print('stage {}/{} is of order {}'.format(i+1,s,k-1))
+        break
+
 def checkOrderConditions(name):
   """ Méthode pour tester les conditions d'ordre, dans le cas particulier du cours de Marc """
   method = getButcher(name)
@@ -784,9 +800,137 @@ def checkOrderConditions(name):
   return 4
   # TODO: generic order conditions
   
+def testReconstructionPrecision(name):
+  """ We test on a simple ODE y'=lbda*y the precision of the recsontruction of the
+  solution time derivatives at the various stages of the method, and see how it converges as dt is decreased """
+  pass
+      
   
 if __name__=='__main__':
   print('Checking orders of available RK methods')
   for method in AVAILABLE_METHODS:
     print('{}: '.format(method), end='')
     checkOrderConditions(method)
+    checkStageOrderConditions(method)
+
+
+  import scipy
+  import scipy.linalg
+  import matplotlib.pyplot as plt
+  y0 = 1.
+  lbda = 4e0  # eigenvalue of the ODE
+  y_analytic = lambda t: y0*np.exp(lbda*t)
+  dydt = lambda t,y: lbda*y # ODE function
+  
+  chosen_time = 2.0 # time point at which the error is estimated
+  
+  names = ['Radau5', 'ESDIRK54A', 'L-SDIRK-33']
+  # names = implicit_methods
+  for name in names:
+  
+    method = getButcher(name)
+    A,b,c = method['A'], method['b'], method['c'] # Butcher coefficients
+    s = b.size
+    bESDIRK = np.all(A[0,:]==0.)
+    
+    dt_vec = np.logspace(0,-4,100) #np.array([1/(2.**i) for i in range(8)])
+      
+    rel_error = np.nan*np.zeros((s, dt_vec.size))
+    # Go through each stage and each value of dt
+    # for each combination, create a "fake" time step scenario, such that the
+    # time "chosen_time", at which the error is to be computed, corresponds to the time
+    # of the selected stage.
+    for i in range(s):
+      for j, dt in enumerate(dt_vec):
+        # find the starting tie of the overall time step, such that tn + c[i]*dt = chosen_time
+        tn = chosen_time - c[i]*dt
+        yn = y_analytic( tn ) # value at the start of the time step
+        
+        # compute the exact solution at each stage
+        stage_times = tn + c*dt
+        
+        # # compute all the stages time derivatives
+        nCase=1
+        if nCase==0: # assume exact derivatives for all other stages
+          stage_vals = y_analytic(stage_times)
+          stage_ders = dydt(stage_times, stage_vals) 
+          # recompute the chosen stage
+          stage_ders[i] = 0 # so that it does not interfere with the follwogin computation (summation)
+          stage_ders[i] =  (stage_vals[i]-yn)/(dt*A[i,i]) - A[i,:].dot(stage_ders)/A[i,i]
+          
+        elif nCase==1: # solve a linear system to compute approx derivatives
+          # (y1,y2,..,ys).T = (y1*(1,1,..,1)).T + dt*A*(dty_1,..,dty_s).T
+          stage_vals = y_analytic(stage_times)
+          stage_ders = np.empty(s)
+          # if bESDIRK: # the system is singular because of the first stage being explicit --> remove it
+          #   stage_ders[0] = dydt(stage_times[0], stage_vals[0])
+          #   stage_ders[1:] = scipy.linalg.solve(a = dt*A[1:,1:],
+          #                                       b = stage_vals[1:] - yn)
+          # else:
+          # stage_ders[:] = scipy.linalg.solve(a = dt*A,
+          #                                      b = stage_vals - yn)
+          # OR: use pseudo-inverse to handle A, even when it is singular
+          stage_ders[:] =  np.linalg.pinv(A).dot( (1/dt)*(stage_vals-yn) )
+        
+        elif nCase==2: # solve approximately (both solution values and derivatives)
+          # from integration_esdirk import FIRK_integration
+          # stage_ders = np.zeros_like( stage_times )
+          # stage_vals = np.zeros_like( stage_times )
+          
+          # # solve the FIRK system
+          # temp = FIRK_integration(fun=dydt, y0=np.array([yn]), t_span=[tn,tn+dt], nt=2, method=method,
+          #                         jacfun=None, bPrint=True, vectorized=False, newtonchoice=2,
+          #                         fullDebug=False)
+          # stage_vals = temp.y_substeps
+          # print('dt={}, stage_vals={}'.format(dt, stage_vals))
+          
+          # for this particular system: (I- lbda*dt*A)*K = lbda*(yn,yn,...)
+          import numpy.matlib
+          yrep = np.matlib.repmat(yn, s, 1)
+          stage_ders = np.linalg.inv( np.eye(s) - lbda*dt*A).dot( lbda * yrep )
+          stage_vals = yrep + lbda*dt*A.dot( stage_ders )
+        
+        else:
+          raise Exception('Unknown case {}'.format(nCase))
+        
+        # compute error
+        true_der = dydt(chosen_time, y_analytic(chosen_time) )
+        rel_error[i,j] = np.abs( (stage_ders[i] - true_der)/true_der )
+        
+
+    #### Plot convergence and orders
+    if bESDIRK: # do not plot the first stage convergence, as the error here will be zero
+      istart=1
+    else:
+      istart=0
+      
+    fig, ax = plt.subplots(2,1,sharex=True, dpi=200)
+    for i in range(istart,s):
+      ax[0].loglog(dt_vec, rel_error[i,:], label='stage {}'.format(i), marker='.')
+      ax[1].semilogx(dt_vec, np.gradient( np.log10(rel_error[i,:]), np.log10(dt_vec)), marker='.')
+    ax[0].legend()
+    ax[-1].set_xlabel('dt (s)')
+    ax[-1].set_ylabel('order')
+    ax[0].set_ylabel('rel error')
+    ax[-1].set_ylim(-1,7)
+    for a in ax:
+      a.grid()
+    fig.suptitle('Relative error on dydt at each stage\nfor {}'.format(name))
+    plt.tight_layout()
+    
+    
+    # alternative plot with dt*lbda
+    # fig, ax = plt.subplots(2,1,sharex=True, dpi=200)
+    # for i in range(istart,s):
+    #   ax[0].loglog(lbda*dt_vec, rel_error[i,:], label='stage {}'.format(i), marker='.')
+    #   ax[1].semilogx(lbda*dt_vec, np.gradient( np.log10(rel_error[i,:]), np.log10(dt_vec)), marker='.')
+    # ax[0].legend()
+    # ax[-1].set_xlabel('dt*lbda')
+    # ax[-1].set_ylim(-1,5)
+    # ax[-1].set_ylabel('order')
+    # ax[0].set_ylabel('rel error')
+    # for a in ax:
+    #   a.grid()
+    # fig.suptitle('Relative error on dydt at each stage\nfor {}'.format(name))
+    # plt.tight_layout()
+    # plt.show()
