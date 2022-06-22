@@ -22,6 +22,7 @@ from scipy.integrate._ivp.common import (validate_max_step, validate_tol, select
 
 ncalls = 0
 jac_factor = None
+NORM_ORD = 2 # None
 
               
 def _validate_jac(y0,fun_vectorized,atol=1e-8,jac=None,sparsity=None):
@@ -78,7 +79,17 @@ def _validate_jac(y0,fun_vectorized,atol=1e-8,jac=None,sparsity=None):
 
   return jac_wrapped, J
 
-def damped_newton_solve(fun, x0, rtol=1e-9, ftol=1e-30, jacfun=None, warm_start_dict=None,
+
+
+def computeStepNorm(dx,x,rtol,atol):
+    """ Step norm is < 1 at convergence"""
+    # return np.linalg.norm(dx/(atol +rtol*abs(x)), ord=NORM_ORD)
+    return np.linalg.norm(dx, ord=NORM_ORD) / rtol / np.sqrt(dx.size)
+
+def computeResidualNorm(res):
+    return np.linalg.norm(res, ord=NORM_ORD)
+
+def damped_newton_solve(fun, x0, rtol=1e-9, atol=None, ftol=1e-30, jacfun=None, warm_start_dict=None,
                         itmax=30, jacmax=10, tau_min=1e-4, convergenceMode=0, jac_sparsity=None,
                         vectorized=False,     bPrint=False, bStoreIterates=False):
     if bPrint:
@@ -89,6 +100,9 @@ def damped_newton_solve(fun, x0, rtol=1e-9, ftol=1e-30, jacfun=None, warm_start_
 
     njev=0
     nlu=0
+    
+    if atol is None:
+        atol=rtol
 
 
     # recover previously computed Jacobian, Lu decomposition, jacobian estimation method
@@ -161,7 +175,6 @@ def damped_newton_solve(fun, x0, rtol=1e-9, ftol=1e-30, jacfun=None, warm_start_
     TAU_MIN  = tau_min
     GOOD_CONVERGENCE_RATIO_STEP = 0.5
     GOOD_CONVERGENCE_RATIO_RES  = 0.5
-    NORM_ORD = None
 
     nx = x0.size
     
@@ -185,8 +198,8 @@ def damped_newton_solve(fun, x0, rtol=1e-9, ftol=1e-30, jacfun=None, warm_start_
 
     dx = solve_lu(LUdec, res)
     nLUsolve=1
-    dx_norm = np.linalg.norm(dx, ord=NORM_ORD)
-    res_norm = np.linalg.norm(res, ord=NORM_ORD)
+    dx_norm  = computeStepNorm(dx,x,atol,rtol)
+    res_norm = computeResidualNorm(res)
     niter=0
     bSuccess=False
     bUpdateJacobian = False
@@ -198,7 +211,7 @@ def damped_newton_solve(fun, x0, rtol=1e-9, ftol=1e-30, jacfun=None, warm_start_
         if bUpdateJacobian:
             custom_print('\tupdating Jacobian')
             if bJacobianAlreadyUpdated:
-              custom_print('\t/!\ the jacobian has already been computed for this value of x --> convergence seems impossible...')
+              raise Exception('\t/!\ the jacobian has already been computed for this value of x --> convergence seems impossible...')
               # TODO: scaled norm of ||dx|| ?
               if 0: # just fail
                 bFailed = True
@@ -207,10 +220,10 @@ def damped_newton_solve(fun, x0, rtol=1e-9, ftol=1e-30, jacfun=None, warm_start_
                 x = x - dx
                 res = fun(x) # initial residuals
                 nfev += 1
-                res_norm = np.linalg.norm(res, ord=NORM_ORD)
+                res_norm = computeResidualNorm(res)
                 dx  = solve_lu(LUdec, res)
                 nLUsolve+=1
-                dx_norm = np.linalg.norm(dx, ord=NORM_ORD)
+                dx_norm = computeStepNorm(dx,x,rtol,atol)
             elif njev > NJAC_MAX:
                 bFailed = True
                 custom_print('too many jacobian evaluations')
@@ -226,8 +239,8 @@ def damped_newton_solve(fun, x0, rtol=1e-9, ftol=1e-30, jacfun=None, warm_start_
               # res = fun(x)
               dx  = solve_lu(LUdec, res)
               nLUsolve+=1
-              dx_norm = np.linalg.norm(dx, ord=NORM_ORD)
-              # res_norm = np.linalg.norm(res, ord=NORM_ORD)
+              dx_norm = computeStepNorm(dx,x,rtol,atol)
+              # res_norm = computeResidualNorm(res)
 
         niter+=1
         if niter > NITER_MAX:
@@ -242,8 +255,9 @@ def damped_newton_solve(fun, x0, rtol=1e-9, ftol=1e-30, jacfun=None, warm_start_
           if convergenceMode==0: # the newton step norm must decrease
               new_dx  = solve_lu(LUdec, new_res)
               nLUsolve+=1
-              new_dx_norm = np.linalg.norm(new_dx, ord=NORM_ORD)
-              new_res_norm = np.linalg.norm(new_res, ord=NORM_ORD)
+              new_dx_norm = computeStepNorm(new_dx,x,rtol,atol)
+              # np.linalg.norm(new_dx, ord=NORM_ORD)
+              new_res_norm = computeResidualNorm(new_res)
               custom_print('\t ||new dx||={:.3e}, ||new res||={:.3e}'.format(new_dx_norm, new_res_norm))
               if new_dx_norm < dx_norm:
                   custom_print('\tstep decrease is satisfying ({:.3e}-->{:.3e} with damping={:.3e})'.format(dx_norm, new_dx_norm, tau))
@@ -252,7 +266,7 @@ def damped_newton_solve(fun, x0, rtol=1e-9, ftol=1e-30, jacfun=None, warm_start_
                       custom_print('slow ||dx|| convergence (ratio is {:.2e})) --> asking for jac udpate'.format(new_dx_norm/dx_norm))
                       bUpdateJacobian = True
           elif convergenceMode==1: # the residual vector norm must decrease
-              new_res_norm = np.linalg.norm(new_res, ord=NORM_ORD)
+              new_res_norm = computeResidualNorm(new_res)
               new_dx, new_dx_norm = None, None
               custom_print('\t ||new res||={:.3e}'.format(new_res_norm))
               if new_res_norm < res_norm:
@@ -280,8 +294,8 @@ def damped_newton_solve(fun, x0, rtol=1e-9, ftol=1e-30, jacfun=None, warm_start_
             nfev+=1
             dx  = solve_lu(LUdec, res)
             nLUsolve+=1
-            dx_norm = np.linalg.norm(dx, ord=NORM_ORD)
-            res_norm = np.linalg.norm(res, ord=NORM_ORD)
+            dx_norm = computeStepNorm(dx,x,rtol,atol)
+            res_norm = computeResidualNorm(res)
 
 
             if tau<0.3:
@@ -306,7 +320,7 @@ def damped_newton_solve(fun, x0, rtol=1e-9, ftol=1e-30, jacfun=None, warm_start_
             if res_norm < ftol:
                 custom_print('residual norm has converged')
                 bSuccess=True
-            if dx_norm < rtol: # TODO: scaled norm ?
+            if dx_norm < 1:#rtol: # TODO: scaled norm ?
                 custom_print('step norm has converged')
                 bSuccess=True
         elif not bFailed:
@@ -344,7 +358,7 @@ def damped_newton_solve(fun, x0, rtol=1e-9, ftol=1e-30, jacfun=None, warm_start_
 if __name__=='__main__':
     import matplotlib.pyplot as plt
     print('=== testing the damped Newton solver ===\n')
-    nprob=0 # choice of the test problem
+    nprob=2 # choice of the test problem
 
     if nprob==0: # non-linear problem, with potential divergence if undamped
       def funplot(x):

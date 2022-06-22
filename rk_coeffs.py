@@ -24,6 +24,11 @@ AVAILABLE_METHODS = implicit_methods + explicit_methods
 def getButcher(name):
   """ Donne le tableau de Butcher (A,b,c) de la méthode RK choisie  """
   name = name.upper()
+  if "reversed-".upper() in name:
+     bReversed=True
+     name = name.replace('reversed-'.upper(),'')
+  else:
+     bReversed=False
   
   A,b,c,Ahat,bhat,chat,embedded=None,None,None,None,None,None,None
   if name=='IE': # Implicit Euler, L-stable stiffly accurate
@@ -31,17 +36,51 @@ def getButcher(name):
     c= np.array([1])
     b= np.array([1])
     strType = "ERK"
+    order=1
   elif name=='EE': # Explicit Euler
     A= np.array([[0]])
     c= np.array([0])
     b= np.array([1])
     strType = "ERK"
+    order=1
+    
+  elif name=='EE-MODIF': # Explicit Euler (fake stage to include final value)
+    A= np.array([[0,0],
+                 [1,0]]) # last line = b
+    b= np.array([1,0])
+    c= np.array([0,1])
+    strType = "ERK"
+    order=1
+    
+  elif name=='EE-SUB4': # Explicit Euler (4 substeps)
+    s=4
+    A= np.array([[(1/s)*(i>j) for j in range(s)] for i in range(s)])
+            #  [0,    0,   0,  0],
+            #  [1/s,  0,   0,  0],
+            #  [1/s, 1/s,  0,  0],
+            #  [1/s, 1/s, 1/s, 0],]) # last line = b
+    c= np.array([i/s for i in range(s)])
+    b= np.array([1/s for i in range(s)])
+    strType = "ERK"
+    order=1
+    
+  elif name=='EE-SUB4-LAST': # Explicit Euler (4 substeps + last step)
+    s=5
+    A= np.array([[(1/(s-1))*(i>j) for j in range(s)] for i in range(s)])
+    
+    c= np.array([i/(s-1) for i in range(s)])
+    b= np.array([1/(s-1)*(i<s-1) for i in range(s)])
+    strType = "ERK"
+    order=1
+    
   elif name=='CRKN': # Crank-Nicolson
     A= np.array([[0, 0],
                  [0, 1]])
     c= np.array([0, 1])
     b= np.array([1/2, 1/2])
     strType = "ESDIRK"
+    order=2
+    
   elif name=='L-SDIRK-22-QZ': #Qin and Zhang
     # not stiffly accurate, but L-stable
     x = 1+np.sqrt(2)/2
@@ -51,6 +90,8 @@ def getButcher(name):
     c= np.array([x, 1])
     b= np.array([1/2, 1/2])
     strType = "SDIRK"
+    order=2
+    
   elif name=='RK4':
     A= np.array([[0,0,0,0],
                  [1/2, 0, 0, 0],
@@ -60,19 +101,63 @@ def getButcher(name):
     c= np.array([0, 1/2, 1/2, 1.])
     b= np.array([1/6, 1/3, 1/3, 1/6])
     strType = "ERK"
+    order=4
+
   elif name=='RK10':
     A,b,c, embedded = RK10coeffs()
     strType = "ERK"
+    order=10
+    
   elif name=="HEUN-EULER": # order 2 adaptive explicit
     A= np.array([[0, 0],
                  [1, 0]])
     c= np.array([0,1])
     b= np.array([1/2, 1/2])
     strType = "ERK"
+    order=2
     embedded = {'mode': 2, # 0 if the error estimate is not available, 1 if it is the difference between two stages (easier for DAEs), 2 if it must be built separately
                 'error_order':1, # order of the error estimate
-                'd':np.array([1,0])-b  # coefficients of the error estimate (if mode==2)
+                'd':np.array([1,0])-b,  # coefficients of the error estimate (if mode==2)
+                'i_high': -1, # -1 means not the last stage but the quadrature one
+                              # which substep is the high-order solution
+                'p_high': 2, # what is its order (global error)
+                'i_low':  1,
+                'p_low':  1,
                 }
+    
+  elif name=="HEUN-EULER-MODIF": # order 2 adaptive explicit
+    # modif pour inverse : on rajoute ynp1 dans les stages
+    A= np.array([[0, 0, 0],
+                 [1, 0, 0],
+                 [1/2, 1/2, 0]])
+    c= np.array([0,1,1])
+    b= np.array([1/2,1/2,0])
+    strType = "ERK"
+    embedded = {'mode': 1, # 0 if the error estimate is not available, 1 if it is the difference between two stages (easier for DAEs), 2 if it must be built separately
+                'error_order':1, # order of the error estimate
+                'i_high': 2, # which substep is the high-order solution
+                'p_high': 2, # what is its order (global error)
+                'i_low':  1,
+                'p_low':  1,
+                }
+    order=2
+    
+  elif name=="HEUN-EULER-1": # order 2 adaptive explicit
+    A= np.array([[0, 0],
+                 [1, 0]])
+    c= np.array([0,1])
+    b= np.array([1,0])
+    order=1
+    strType = "ERK"
+  elif name=="HEUN-EULER-2": # order 2 adaptive explicit
+    A= np.array([[0, 0],
+                 [1, 0]])
+    c= np.array([0,1])
+    b= np.array([1/2, 1/2])
+    order=2 # order of the quadrature solution obtained with b
+    strType = "ERK"
+   
+    
   elif name=="RK23" or name=="Bogacki–Shampine".upper(): # order 3 adaptive explicit
     A= np.array([[0, 0, 0, 0],
                  [1/2, 0, 0, 0],
@@ -80,6 +165,7 @@ def getButcher(name):
                  [2/9, 1/3, 4/9, 0]])
     c= np.array([0,1/2,3/4,1])
     b= np.array([2/9,1/3,4/9,0])
+    order=3
     strType = "ERK"
     embedded = {'mode': 2, # 0 if the error estimate is not available, 1 if it is the difference between two stages (easier for DAEs), 2 if it must be built separately
                 'error_order':2, # order of the error estimate
@@ -96,14 +182,83 @@ def getButcher(name):
           [9017/3168, -355/33, 46732/5247, 49/176, -5103/18656, 0, 0],
           [35/384, 0, 500/1113, 125/192, -2187/6784, 11/84, 0]
         ])
-    b = np.array([35/384, 0, 500/1113, 125/192, -2187/6784, 11/84, 0])
-    c = np.array([0, 1/5, 3/10, 4/5, 8/9, 1, 1])
+    b = np.array([35/384, 0,   500/1113, 125/192, -2187/6784, 11/84, 0])
+    c = np.array([0,      1/5, 3/10,     4/5,      8/9,        1,    1])
     
+    # embedded = {'mode': 2, # 0 if the error estimate is not available, 1 if it is the difference between two stages (easier for DAEs), 2 if it must be built separately
+    #             'error_order':4, # order of the error estimate
+    #             'd':np.array([-71/57600, 0, 71/16695, -71/1920, 17253/339200, -22/525, 1/40])  # coefficients of the error estimate (if mode==2)
+    #             }
     embedded = {'mode': 2, # 0 if the error estimate is not available, 1 if it is the difference between two stages (easier for DAEs), 2 if it must be built separately
                 'error_order':4, # order of the error estimate
-                'd':np.array([-71/57600, 0, 71/16695, -71/1920, 17253/339200, -22/525, 1/40])  # coefficients of the error estimate (if mode==2)
+                # 'd':np.array([-71/57600, 0, 71/16695, -71/1920, 17253/339200, -22/525, 1/40]),  # coefficients of the error estimate (if mode==2)
+                'i_high': 6, # -1 means not the last stage but the quadrature one
+                              # which substep is the high-order solution
+                'p_high': 5, # what is its order (global error)
+                'i_low':  -1,
+                'p_low':  4,
                 }
     strType = "ERK"
+    order=5
+    
+  elif name=="RK45-MODIF":
+      A = np.array([
+            [0,   0, 0, 0, 0, 0, 0, 0],
+            [1/5, 0, 0, 0, 0, 0, 0, 0],
+            [3/40, 9/40, 0, 0, 0, 0, 0, 0],
+            [44/45, -56/15, 32/9, 0, 0, 0, 0, 0],
+            [19372/6561, -25360/2187, 64448/6561, -212/729, 0, 0, 0, 0],
+            [9017/3168, -355/33, 46732/5247, 49/176, -5103/18656, 0, 0, 0],
+            [35/384, 0, 500/1113, 125/192, -2187/6784, 11/84, 0, 0],
+            [5179/57600, 0, 7571/16695, 393/640, -92097/339200, 187/2100, 1/40, 0],
+          ])
+      b = np.array([35/384, 0,   500/1113, 125/192, -2187/6784, 11/84, 0, 0])
+      c = np.array([0,      1/5, 3/10,     4/5,      8/9,        1,    1, 1])
+      
+      # embedded = {'mode': 2, # 0 if the error estimate is not available, 1 if it is the difference between two stages (easier for DAEs), 2 if it must be built separately
+      #             'error_order':4, # order of the error estimate
+      #             'd':np.array([-71/57600, 0, 71/16695, -71/1920, 17253/339200, -22/525, 1/40])  # coefficients of the error estimate (if mode==2)
+      #             }
+      embedded = {'mode': 2, # 0 if the error estimate is not available, 1 if it is the difference between two stages (easier for DAEs), 2 if it must be built separately
+                  'error_order':4, # order of the error estimate
+                  # 'd':np.array([-71/57600, 0, 71/16695, -71/1920, 17253/339200, -22/525, 1/40]),  # coefficients of the error estimate (if mode==2)
+                  'i_high': 6, # -1 means not the last stage but the quadrature one
+                                # which substep is the high-order solution
+                  'p_high': 5, # what is its order (global error)
+                  'i_low':  7,
+                  'p_low':  4,
+                  }
+      strType = "ERK"
+      order=5
+  
+  elif name=="RK45-5":
+    A = np.array([
+          [0,   0, 0, 0, 0, 0],
+          [1/5, 0, 0, 0, 0, 0],
+          [3/40, 9/40, 0, 0, 0, 0],
+          [44/45, -56/15, 32/9, 0, 0, 0],
+          [19372/6561, -25360/2187, 64448/6561, -212/729, 0, 0],
+          [9017/3168, -355/33, 46732/5247, 49/176, -5103/18656, 0],
+        ])
+    b = np.array([35/384, 0, 500/1113, 125/192, -2187/6784, 11/84])
+    c = np.array([0,      1/5, 3/10,     4/5,      8/9,        1])
+    strType = "ERK"
+    order=5
+    
+  elif name=="RK45-4":
+    A = np.array([
+          [0,   0, 0, 0, 0, 0, 0],
+          [1/5, 0, 0, 0, 0, 0, 0],
+          [3/40, 9/40, 0, 0, 0, 0, 0],
+          [44/45, -56/15, 32/9, 0, 0, 0, 0],
+          [19372/6561, -25360/2187, 64448/6561, -212/729, 0, 0, 0],
+          [9017/3168, -355/33, 46732/5247, 49/176, -5103/18656, 0, 0],
+          [35/384, 0, 500/1113, 125/192, -2187/6784, 11/84, 0]
+        ])
+    b = np.array([5179/57600, 0, 7571/16695, 393/640, -92097/339200, 187/2100, 1/40])
+    c = np.array([0,      1/5, 3/10,     4/5,      8/9,        1,    1])
+    strType = "ERK"
+    order=4
     
   
    
@@ -198,6 +353,7 @@ def getButcher(name):
         b_low = np.zeros(7)
         b = np.zeros(7)
         c = np.zeros(7)
+        order=5
 
         A[1,0] = 0.26
         A[1,1] = 0.26
@@ -338,7 +494,8 @@ def getButcher(name):
       b = A[-1,:]
       c = np.array([2/5 -r6/10, 2/5+r6/10, 1.])
       strType = "IRK"      
-
+      order=5
+      
   elif name=='SDIRK4()5L[1]SA-1': # review nasa diagonally implicit RK, page 95, table 22
       coeff = 1
       A = np.zeros((5,5))
@@ -537,7 +694,15 @@ def getButcher(name):
   assert A.shape[0]==A.shape[1], 'A must be square'
   assert b.size==A.shape[1]
   assert c.size==A.shape[1]
-  method = {'A':A, 'b':b, 'c':c, 'Ahat': Ahat, 'bhat': bhat, 'chat':chat, 'embedded': embedded, 'isEmbedded': not (embedded is None)}
+  
+  
+  if bReversed:
+      embedded=None
+      A,b,c = reverseRK(A,b,c)
+  method = {'A':A, 'b':b, 'c':c,
+            'Ahat': Ahat, 'bhat': bhat, 'chat':chat,
+            'order': order,
+            'embedded': embedded, 'isEmbedded': not (embedded is None)}
   return method
   # return A,b,c
 
@@ -737,6 +902,7 @@ def RK10coeffs():
             value = float(temp2[2])
             A[k,j] = value
     embedded=None
+    
     return A,b,c,embedded
   
 def checkStageOrderConditions(name)  :
@@ -805,6 +971,20 @@ def testReconstructionPrecision(name):
   solution time derivatives at the various stages of the method, and see how it converges as dt is decreased """
   pass
       
+def reverseRK(A,b,c):
+    """ Compute the inverse RK method """
+    newA=np.zeros_like(A)
+    newb=np.zeros_like(b)
+    # newc=np.zeros_like(c)
+    s = len(newb)
+    newb = np.flip(b)
+    newc = np.flip(c)
+    newc = 1-newc
+    for i in range(s):
+      # newc[i] = 1 - c[s-i]
+      for j in range(s):
+          newA[i,j] = b[s-1-j] - A[s-1-i,s-1-j]
+    return newA,newb,newc
   
 if __name__=='__main__':
   print('Checking orders of available RK methods')

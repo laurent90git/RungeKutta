@@ -9,6 +9,7 @@ Visualization of the stability and precision of RUnge-Kutta methods
 import numpy as np
 import matplotlib.pyplot as plt
 import rk_coeffs
+from rk_coeffs import reverseRK
 import sympy as sp
 sp.init_printing()
 from sympy.utilities import lambdify
@@ -57,6 +58,7 @@ class testPrecision:
           R=np.vectorize(Rlbda)
           Rsym=None
         return R, Rsym
+        
 
     def plotOrderStars(self, A,b,c):
         """ Plots the order star of the RK method, i.e. the locus such that |R(z)|/|exp(z)|=1"""
@@ -125,14 +127,14 @@ class testPrecision:
 
 
 
-    def plotStabilityRegionRK(self, A,b,c):
+    def plotStabilityRegionRK(self, A,b,c,bSympy=True):
         # Contour de la précision / stabilité
         xx,yy = self.re_xx, self.im_yy
         zz = self.eigvals
         x= self.re
         y= self.im
 
-        Rfun, Rsym = self.computeStabilityFunction(A,b,c)
+        Rfun, Rsym = self.computeStabilityFunction(A,b,c,bSympy=bSympy)
         RR   = Rfun(zz) # solution RK
         expp = np.exp(self.eigvals) # solution analytique
         rr = np.abs(RR) # ratio d'augmentation
@@ -317,10 +319,13 @@ if __name__=='__main__':
 
     #%% Show the precision and stability of a given RK method
     method = rk_coeffs.getButcher('Radau5')
+    # method = rk_coeffs.getButcher('RK45')
     A,b,c = method['A'], method['b'], method['c']
     
+    # A,b,c = reverseRK(A,b,c)
+    
     # tracé du contour de la précision par rapport à l'exponentielle
-    pprecision, pprecision2 = test.plotStabilityRegionRK(A,b,c)
+    pprecision, pprecision2 = test.plotStabilityRegionRK(A,b,c, bSympy=False)
     R, Rsym = test.computeStabilityFunction(A,b,c, bSympy=False)
 
     # calcul du rayon spectral
@@ -331,9 +336,8 @@ if __name__=='__main__':
     print('R(1/rho)=', R(1/rho))
     print('R(1/rho + 1e-6)=', R(1/rho + 1e-6))
 
-#%%
 
-    #%% tracé des order stars
+    #% tracé des order stars
     test.plotOrderStars(A,b,c)
 
     #%% estimate R(+\infty)
@@ -364,7 +368,10 @@ if __name__=='__main__':
     #%% Plot comparison of precision zone along the real axis
     polys=[]
     # names = ['ie','rk4','rk10', 'radau5', 'esdirk54a']#, 'ESDIRK43B', 'ESDIRK32A']
-    names = ['ie', 'esdirk32a', 'radau5']#, 'ESDIRK43B', 'ESDIRK32A']
+    # names = ['ie', 'esdirk32a', 'radau5']#, 'ESDIRK43B', 'ESDIRK32A']
+    names = ['reversed-RK23', 'reversed-RK4', 'reversed-RK45',
+              'reversed-RK10', 'radau5', 'RK10']
+    # names = ['reversed-RK45-4', 'reversed-RK45-5', 'RK45']
     for name in names:
         print(name)
         method = rk_coeffs.getButcher(name)
@@ -399,23 +406,26 @@ if __name__=='__main__':
       ax[0].grid(which='both', axis='both')
       
     # Tracé de l'évolution de R(z) le long de l'axe réel
-    z_vec = np.linspace(-6,8,10000)
+    z_vec = np.linspace(-15,15,10000)
     th_sol = np.exp(z_vec)
-    for i in range(2):
-      fig,ax = plt.subplots(1,1,sharex=True)
-      ax=[ax]
-      for j,p in enumerate(polys):
-          r = p[0](z_vec)          
-          ax[0].semilogy(z_vec, np.abs(r), label=names[j])
-      # ax[0].set_ylim( 1e-15, 1e10)
-      ax[0].legend()
-      ax[0].set_ylabel('|R(z)|')
-      ax[0].set_xlabel('z')
-      ax[0].grid(which='both', axis='both')
+    fig,ax = plt.subplots(1,1,sharex=True, dpi=200)
+    ax=[ax]
+    for j,p in enumerate(polys):
+        r = p[0](z_vec)          
+        ax[0].semilogy(z_vec, np.abs(r), label=names[j])
+
+    ax[0].semilogy(z_vec, np.abs(np.exp(z_vec)),
+                   label='exp', linestyle='--', color=[0,0,0])
+    ax[0].set_ylim( 1e-8, 1e6)
+    ax[0].legend(framealpha=0)
+    ax[0].set_ylabel('|R(z)|')
+    ax[0].set_xlabel('z')
+    ax[0].grid(which='both', axis='both')
 
     #%% Comparaison entre embedded methods
     polys=[]
-    names = ['esdirk54a', 'ESDIRK54A-V4']
+    # names = ['esdirk54a', 'ESDIRK54A-V4']
+    names = ['RK45', 'ESDIRK54A-V4']
     for name in names:
         print(name)
         method = rk_coeffs.getButcher(name)
