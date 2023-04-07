@@ -149,6 +149,7 @@ def getButcher(name):
     b= np.array([1,0])
     order=1
     strType = "ERK"
+    
   elif name=="HEUN-EULER-2": # order 2 adaptive explicit
     A= np.array([[0, 0],
                  [1, 0]])
@@ -271,6 +272,7 @@ def getButcher(name):
     c = np.array([1/2, 2/3, 1/2, 1])
     b = A[-1,:]
     strType = "SDIRK"
+    
   elif name=='L-SDIRK-33': # L-Stable, stiffly accurate, 3 stages, 3 order, SDIRK method
     x = 0.4358665215
     A= np.array([ [x,                                  0,              0],
@@ -280,6 +282,7 @@ def getButcher(name):
     c= np.array([x, (1+x)/2, 1])
     b= A[-1,:]
     strType = "SDIRK"
+    
   elif name== 'ESDIRK32A-3': # stiffly accurate
     # méthode d'ordre 3 extraite de la méthode embedded ESDIRK 32 avec 4 stages
     # taken from A FAMILY OF ESDIRK INTEGRATION METHODS
@@ -294,6 +297,8 @@ def getButcher(name):
     c= np.array([0, 2*gamma, 1, 1])
     b= A[-1,:]
     strType = "ESDIRK"
+    order=3
+    
   elif name== 'ESDIRK32A-2': # stiffly accurate
     # méthode d'ordre 2 extraite de la méthode embedded ESDIRK 32 avec 4 stages
     # taken from A FAMILY OF ESDIRK INTEGRATION METHODS
@@ -307,6 +312,8 @@ def getButcher(name):
     c= np.array([0, 2*gamma, 1])
     b= A[-1,:]
     strType = "ESDIRK"
+    order=2
+    
   elif name=='ESDIRK32A': #embedded method
     gamma = 0.4358665215
     gamma = 0.4358665215
@@ -327,6 +334,7 @@ def getButcher(name):
     isub_low  = 3 # le 3ème substep correspond au pas final de la méthode d'ordre faible
     embedded = { 'isub_high':isub_high, 'isub_low':isub_low, 'p_low':p_low, 'p_high':p_high , 'd':d}
     strType = "ESDIRK"
+    order=3
     
   elif name=='ESDIRK43B': #embedded method
     A= np.array([ [0, 0, 0, 0, 0],
@@ -347,6 +355,24 @@ def getButcher(name):
     isub_low  = 4 # le 3ème substep correspond au pas final de la méthode d'ordre faible
     embedded = { 'isub_high':isub_high, 'isub_low':isub_low, 'p_low':p_low, 'p_high':p_high , 'd':d}
     strType = "ESDIRK"
+    order=4
+    
+  elif name=='ESDIRK43B-3': #embedded method
+      A= np.array([ [0, 0, 0, 0, 0],
+                    [0.43586652150846, 0.43586652150846, 0, 0, 0],
+                    [0.14073777472471, -0.10836555138132, 0.43586652150846, 0, 0],
+                    [0.10239940061991, -0.37687845225556, 0.83861253012719, 0.43586652150846, 0],
+                    [0.15702489786032,  0.11733044137044, 0.61667803039212, -0.32689989113134, 0.43586652150846],
+                  ])
+      c= np.array([0, 0.87173304301692, 0.46823874485185, 1, 1])
+  
+      A=A[:-1,:-1]
+      c=c[:-1]
+      
+      b     = A[-1,:]
+      strType = "ESDIRK"
+      order=3
+      
   elif name=='ESDIRK54A': #embedded method (Kvaerno 2004, but coeffs found in arkcode butcher)
         # 7 stages, orders 5 and 4, both stiffly accurate
         A = np.zeros((7,7))
@@ -419,6 +445,7 @@ def getButcher(name):
                     'd':None               # coefficients of the error estimate (if mode==2)
                     }
         strType = "ESDIRK"
+        order=5
   elif name=='ESDIRK54A-V4': #method of ordre 4 extracted from the Kvaerno 54a method
         A = np.zeros((6,6))
         b = np.zeros(6)
@@ -458,7 +485,7 @@ def getButcher(name):
         c[5] = 1.0
         assert(np.all(b==A[-1,:]))
         strType = "ESDIRK"
-  
+        order = 4
   elif name=='RADAUIA-5':
       A = np.zeros((3,3))
       A[0,0] = 1/9
@@ -476,6 +503,7 @@ def getButcher(name):
       b = np.array([1/9, 4/9 + (6**0.5)/36, 4/9 - (6**0.5)/36])
       c = np.array([0, 3/5-(6**0.5)/10, 3/5+(6**0.5)/10])
       strType = "IRK"      
+      order = 3
   elif name=='RADAUIIA-5' or name=='RADAU5':
       A = np.zeros((3,3))
       r6 = 6**0.5
@@ -520,7 +548,7 @@ def getButcher(name):
       b[:] = A[-1,:]
       c = np.array([1/4, (2-coeff*(2**0.5))/4, (13+coeff*8*(2**0.5))/41, (41+coeff*9*(2**0.5))/49, 1.])
       strType = "SDIRK"      
-      
+      order=4
   elif name=='SDIRK4()5L[1]SA-2':
       coeff = -1
       A = np.zeros((5,5))
@@ -545,9 +573,9 @@ def getButcher(name):
       b[:] = A[-1,:]
       c = np.array([1/4, (2-coeff*(2**0.5))/4, (13+coeff*8*(2**0.5))/41, (41+coeff*9*(2**0.5))/49, 1.])
       strType = "SDIRK"      
-      
+      order=4
   elif name=='ESDIRK5(4I)8L[2]SA':
-      raise Exception("j'ai du me trompé dans cette méthode, car même sur burgers simple, elle CV à l'odre 1")
+      raise Exception("j'ai du me tromper dans cette méthode, car même sur burgers simple, elle CV à l'ordre 1")
       # ESdirk method, stiffly accurate, Diagonally Implicit Runge-Kutta Methods for Ordinary Differential Equations. A Review       by Christopher A. Kennedy
       # error control possible
       A = np.zeros((8,8))
@@ -571,7 +599,8 @@ def getButcher(name):
 
       b[:] = A[-1,:]
       c = np.array([0, 1/2, (2+np.sqrt(2))/4, 53/100, 4/5, 17/25, 1, 1])
-      strType = "SDIRK"      
+      strType = "SDIRK"
+      order=5
       
   #################
   ##### IMEX ######
@@ -593,6 +622,7 @@ def getButcher(name):
     bhat=np.array([delta, 1-delta, 0])
     chat=np.array([0, gamma, 1])
     strType = "IMEX"
+    order=2
 
   elif name=='FBeuler111':
     A = np.array([[1]])
@@ -605,6 +635,7 @@ def getButcher(name):
     bhat=np.array([1,0])
     chat=np.array([0,1])
     strType = "IMEX"
+    order=1
     
   elif name=='DIRK121':
     A = np.array([[1]])
@@ -702,7 +733,8 @@ def getButcher(name):
   method = {'A':A, 'b':b, 'c':c,
             'Ahat': Ahat, 'bhat': bhat, 'chat':chat,
             'order': order,
-            'embedded': embedded, 'isEmbedded': not (embedded is None)}
+            'embedded': embedded, 'isEmbedded': not (embedded is None),
+            'name': name}
   return method
   # return A,b,c
 

@@ -121,7 +121,7 @@ def inverseERKintegration(fun, y0, t_span, nt, method, jacfun=None, bPrint=True,
         out.njev += infodict['njev']
         if infodict['ier']!=0: # Newton did not converge
           # restart the Newton solve with all outputs enabled
-          ynp1, infodict, warm_start_dict = damped_newton_solve(fun=lambda x: resfun(Y=x,y0=unm1, tn=tn, dt=dt, A=At, n=n, s=s),
+          ynp1, infodict, warm_start_dict = damped_newton_solve(fun=lambda x: resfun(Y=x,y0=unm1, tn=tn, dt=dt, A=A, n=n, s=s),
                                                                     x0=np.copy(yini), rtol=1e-9, ftol=1e-30,
                                                                     jacfun=None, warm_start_dict=warm_start_dict,
                                                                     itmax=100, jacmax=20, tau_min=1e-4, convergenceMode=0, bPrint=True)

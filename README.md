@@ -1,12 +1,15 @@
 # Runge-Kutta
-Generic Runge-Kutta solver (explicit or implicit) and damped Newton method implemented in Python, for educational purposes. A few test cases are given (heat equation, spring-mass system, Curtiss-Hirschfelder).
+This repository offers basic implementations in Python of Runge-Kutta methods (explicit and implicit) for educational purposes. A damped Newton method is also available with efficient Jacobian reuse.
+A few test cases are given (heat equation, spring-mass system, Curtiss-Hirschfelder).
 
-A script is also provided to study the stability domains, order stars and relative precision contours of any Runge-Kutta scheme.
+Dynamic time step adaptation is implemented for explicit embedded methods.
+
+A script is also provided to study the stability domains, order stars and relative precision contours of any Runge-Kutta scheme. Here is the result for the well-known Radau5 scheme:
+
+<img src="https://raw.githubusercontent.com/laurent90git/RungeKutta/91b5c1effac3c54d9baf2a46cf79dacfa87c23cc/img/radau5.png" width="500"/>
 
 # TODO:
 - time step adaptation:
-	- embedded methods where two stage form the solution
-	- embedded method where the estimated error has its own coefficients
 	- Shampine's trick to L-stabilize the error estimate if necessary
 - damped newton improvements:
 	- trade between more iterations and more jacobian updates
