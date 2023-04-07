@@ -43,10 +43,10 @@ def jac(t,x):
                                                       as_linear_operator=False, args=(), kwargs={})
 
 A,b,c = rk_coeffs.getButcher(name=method)
-dt = 2e-4 # ok pour Radau5, sinon non CV
+dt = 2e-3 # ok pour Radau5, sinon non CV
 nt = int((tend-tini)/dt)
 sol = integration_esdirk.DIRK_integration(fun=fcn, y0=yini, t_span=[tini, tend], nt=nt,
-                                    A=A, b=b, c=c, jacfun=jac, newtonchoice=2)    
+                                    A=A, b=b, c=c, jacfun=jac, newtonchoice=2)
 
 # sol = integration_esdirk.FIRK_integration(fun=fcn, y0=yini, t_span=[tini, tend], nt=nt,
 #                                    A=A, b=b, c=c, jacfun=None, newtonchoice=2,fullDebug=True)

@@ -7,7 +7,14 @@ Visualization of the stability and precision of RUnge-Kutta methods
 @author: laurent.francois@polytechnique.edu
 """
 import numpy as np
+import matplotlib
 import matplotlib.pyplot as plt
+# set latex fonts and latex package
+plt.rc('text', usetex=True)
+plt.rc('font', family='serif',size='15')
+matplotlib.rcParams['text.latex.preamble']=[r"\usepackage{amsmath}"]
+
+
 import rk_coeffs
 import sympy as sp
 sp.init_printing()
@@ -132,7 +139,7 @@ class testPrecision:
         x= self.re
         y= self.im
 
-        Rfun, Rsym = self.computeStabilityFunction(A,b,c)
+        Rfun, Rsym = self.computeStabilityFunction(A,b,c,bSympy=np.size(b)<6)
         RR   = Rfun(zz) # solution RK
         expp = np.exp(self.eigvals) # solution analytique
         rr = np.abs(RR) # ratio d'augmentation
@@ -141,54 +148,77 @@ class testPrecision:
         # add contour of precision relative to exponential
         pprecision1 = 100*np.abs((RR-expp)/expp) # précision en pourcents par rapport à la solution analytique
         pprecision2 = 100*np.abs((RR-expp)/RR) # précision en pourcents par rapport à la solution numérique
-
+        pprecision3 = np.minimum(pprecision1,pprecision2)
         # map_levels = np.linspace(-5,5,50)
         # map_levels = np.linspace(-6,6,50)
         map_levels = np.linspace(-3,3,50)
         # map_levels = np.hstack((-99, map_levels, 99))
         cmap=None
+
+        if 1: # full plots
+            hachurer_zone_precision_100p = True
+            hachurer_zone_instable = True
+            ajouter_order_star = True
+            isolignes_precision = True
+            contour_precision_relative = True
+        else:
+            hachurer_zone_precision_100p = False
+            hachurer_zone_instable = False
+            ajouter_order_star = False
+            isolignes_precision = True
+            contour_precision_relative=False
+
         # for cmap in  [
         #     'flag', 'prism', 'ocean', 'gist_earth', 'terrain', 'gist_stern',
         #     'gnuplot', 'gnuplot2', 'CMRmap', 'cubehelix', 'brg',
         #     'gist_rainbow', 'rainbow', 'jet', 'nipy_spectral', 'gist_ncar']:
-        for pprecision,name in [(pprecision1, '(avec réf=exp(z))'),
-                                #(pprecision2, '(avec réf = R(z))'),
+
+        for pprecision,name in [
+                                (pprecision1, '$\exp(z)$'),
+                                # (pprecision2, '(avec réf = R(z))'),
+                                # (pprecision3, '(erreur min)'),
                                 ]:
-            # ratio_height_over_width = np.abs( (np.max(y)-np.min(y))/(np.max(x)-np.min(x)) )
-            # fig, ax = plt.subplots(1,1,dpi=80, figsize=(8, 8*ratio_height_over_width))
-            fig, ax = plt.subplots(1,1,dpi=300)#, figsize=(8, 8*ratio_height_over_width))
+            ratio_height_over_width = np.abs( (np.max(y)-np.min(y))/(np.max(x)-np.min(x)) )
+            fig, ax = plt.subplots(1,1,dpi=300, figsize=(10, 8*ratio_height_over_width))
+            # fig, ax = plt.subplots(1,1,figsize=dpi=300)#, figsize=(8, 8*ratio_height_over_width))
             # plot des axes Im et Re
-            ax.plot([np.min(x), np.max(x)], [0,0], color=(0,0,0), linestyle='--', linewidth=0.4)
-            ax.plot([0,0], [np.min(y), np.max(y)], color=(0,0,0), linestyle='--', linewidth=0.4)
+            ax.axhline(0, color=(0,0,0), linestyle='--', linewidth=0.4)
+            ax.axvline(0, color=(0,0,0), linestyle='--', linewidth=0.4)
 
             # contour de la précision relative
-            cs = ax.contourf(xx,yy, np.log10(pprecision), levels=map_levels, cmap=cmap) #, cmap = 'gist_earth')
-            fig.colorbar(cs)
+            if contour_precision_relative:
+                cs = ax.contourf(xx,yy, np.log10(pprecision), levels=map_levels, cmap=cmap) #, cmap = 'gist_earth')
+                fig.colorbar(cs)
 
             # add contour lines for precision
-            # levels = np.round(np.logspace(0,2,5)).astype(int)
-            levels = np.array( range(0,200,25) )
-            # levels = np.array([1,5,25,50,100,500]) #np.array(range(0,200,25))
-            level_contour = ax.contour(xx,yy, pprecision, levels=levels, colors='k')
-            ax.clabel(level_contour, inline=1, fontsize=10,  fmt='%1.0f')
+            if isolignes_precision:
+                # levels = np.round(np.logspace(0,2,5)).astype(int)
+                # levels = np.array( range(0,200,25) )
+                # levels = np.array([1,5,25,50,100,500]) #np.array(range(0,200,25))
+                levels = 10.**np.array(range(-3,3+1))
+                                      #np.array([1,10,100,1000]) #np.array(range(0,200,25))
+                level_contour = ax.contour(xx,yy, pprecision, levels=levels, colors='k')
+                # ax.clabel(level_contour, inline=1, fontsize=10,  fmt='%1.0f')
+                ax.clabel(level_contour, inline=1, fontsize=10,  fmt='%1.0e')
 
             ## Axis description
-            fig.suptitle(f'Domaine de stabilité (rouge), iso-contour de précision (%)\n et map de la précision (log10), erreur {name}')
+            fig.suptitle(f'Domaine de stabilité (rouge), order star (bleu),\niso-contour de précision (\%) et map de la précision (log10) par rapport à {name}')
             ax.set_xlabel(r'Re$(\lambda\Delta t)$')
             ax.set_ylabel(r'Im$(\lambda\Delta t)$')
 
             # hachurer les zones > 100%
-            error_sup_100 = np.where(pprecision >= 100.)
-            temp = np.zeros_like(pprecision)
-            temp[error_sup_100] = 1.
-            cs   = ax.contourf(xx,yy, temp, colors=['w', 'w', 'w'], levels=[0,0.5,1.5],  #levels=[0., 1.0, 1.5],
-                               hatches=[None,'//', '//'], alpha = 0.)
+            if hachurer_zone_precision_100p:
+                error_sup_100 = np.where(pprecision >= 100.)
+                temp = np.zeros_like(pprecision)
+                temp[error_sup_100] = 1.
+                cs   = ax.contourf(xx,yy, temp, colors=['w', 'w', 'w'], levels=[0,0.5,1.5],  #levels=[0., 1.0, 1.5],
+                                   hatches=[None,'//', '//'], alpha = 0.)
 
             # add stability domain
             ax.contour(xx,yy,rr,levels=[0,1],colors='r')
 
             # hachurer en rouge la zone instable
-            if 1:
+            if hachurer_zone_instable:
               rr_sup_1 = np.where(np.abs(rr) >= 1)
               temp = np.zeros_like(rr)
               temp[rr_sup_1] = 1.
@@ -198,12 +228,13 @@ class testPrecision:
               plt.rcParams['hatch.color']=[0,0,0]
 
             # add order star
-            order_star = np.abs(RR)/np.abs(expp)
-            plt.rcParams['hatch.color']='b'  # seul moyen que j'ai trouvé pour avoir des hachures colorées...
-            cs   = ax.contour(xx,yy, order_star, colors='b', levels=[0.,1.])
-            cs   = ax.contourf(xx,yy, order_star, levels=[0., 1.0, 1.5],
-                              hatches=[None,'\\\\',None], alpha = 0.)
-            plt.rcParams['hatch.color']=[0,0,0]
+            if ajouter_order_star:
+                order_star = np.abs(RR)/np.abs(expp)
+                plt.rcParams['hatch.color']='b'  # seul moyen que j'ai trouvé pour avoir des hachures colorées...
+                cs   = ax.contour(xx,yy, order_star, colors='b', levels=[0.,1.])
+                # cs   = ax.contourf(xx,yy, order_star, levels=[0., 1.0, 1.5],
+                                  # hatches=[None,'\\\\',None], alpha = 0.)
+                plt.rcParams['hatch.color']=[0,0,0]
 
 
             # ax.axis('equal')
@@ -221,32 +252,63 @@ class testPrecision:
             fig2.colorbar(cs)
             fig2.suptitle('emplacement des NaNs dans exp(z)')
 
+        if 0:
+            # Tracé de l'expansion de la solution (en norme)
+            fig2, ax = plt.subplots(1,1)
+            # plot des axes Im et Re
+            ax.plot([np.min(x), np.max(x)], [0,0], color=(0,0,0), linestyle='--', linewidth=0.4)
+            ax.plot([0,0], [np.min(y), np.max(y)], color=(0,0,0), linestyle='--', linewidth=0.4)
 
-        # Tracé de l'expansion de la solution (en norme)
-        fig2, ax = plt.subplots(1,1)
-        # plot des axes Im et Re
-        ax.plot([np.min(x), np.max(x)], [0,0], color=(0,0,0), linestyle='--', linewidth=0.4)
-        ax.plot([0,0], [np.min(y), np.max(y)], color=(0,0,0), linestyle='--', linewidth=0.4)
+            # plot "expansion" ratio
+            map_levels = np.array(np.linspace(-3,3,20)) #np.logspace(-3,3,20)
+            cs = ax.contourf(xx,yy, np.log10(rr), levels=map_levels)#, cmap = 'gist_earth')
+            # map_levels = np.array(np.logspace(0,3,20))
+            # cs = ax.contourf(xx,yy, rr, levels=map_levels)#, cmap = 'gist_earth')
+            fig2.colorbar(cs)
+            ax.contour(xx,yy,rr,levels=[0,1],colors='r') # add stability domain
+            ax.set_title('log10(|R(z)|) = expansion ratio of numerical solution')
 
-        # plot "expansion" ratio
-        map_levels = np.array(np.linspace(-3,3,20)) #np.logspace(-3,3,20)
-        cs = ax.contourf(xx,yy, np.log10(rr), levels=map_levels)#, cmap = 'gist_earth')
-        # map_levels = np.array(np.logspace(0,3,20))
-        # cs = ax.contourf(xx,yy, rr, levels=map_levels)#, cmap = 'gist_earth')
-        fig2.colorbar(cs)
-        ax.contour(xx,yy,rr,levels=[0,1],colors='r') # add stability domain
-        ax.set_title('log10(|R(z)|) = expansion ratio of numerical solution')
+        if 1: # Tracé de l'angle de R(z)
+            # Tracé de l'expansion de la solution (en norme)
+            fig2, ax = plt.subplots(1,1)
+            # plot des axes Im et Re
+            ax.axhline(0, color=(0,0,0), linestyle='--', linewidth=0.4)
+            ax.axvline(0, color=(0,0,0), linestyle='--', linewidth=0.4)
+
+            # plot "expansion" ratio
+            map_levels = None
+            # cs = ax.contourf(xx,yy, np.sign(RR.real), levels=map_levels)#, cmap = 'gist_earth')
+            cs = ax.contourf(xx,yy, np.angle(RR), levels=map_levels)#, cmap = 'gist_earth')
+            # map_levels = np.array(np.logspace(0,3,20))
+            # cs = ax.contourf(xx,yy, rr, levels=map_levels)#, cmap = 'gist_earth')
+            fig2.colorbar(cs)
+            ax.contour(xx,yy,rr,levels=[0,1],colors='r') # add stability domain
+            ax.set_title('log10(|R(z)|) = expansion ratio of numerical solution')
+
 
         # tracé de la solution analytique = exp(Re(z))
-        fig2, ax = plt.subplots(1,1)
-        # plot des axes Im et Re
-        ax.plot([np.min(x), np.max(x)], [0,0], color=(0,0,0), linestyle='--', linewidth=0.4)
-        ax.plot([0,0], [np.min(y), np.max(y)], color=(0,0,0), linestyle='--', linewidth=0.4)
-        # plot "expansion" ratio
-        cs = ax.contourf(xx,yy, np.log10(np.abs(expp)), levels=map_levels)#, cmap = 'gist_earth')
-        fig2.colorbar(cs)
-        ax.contour(xx,yy,rr,levels=[0,1],colors='r') # add stability domain
-        ax.set_title('expansion ratio of analytical solution')
+        if 0:
+            fig2, ax = plt.subplots(1,1)
+            # plot des axes Im et Re
+            ax.axhline(0, color=(0,0,0), linestyle='--', linewidth=0.4)
+            ax.axvline(0, color=(0,0,0), linestyle='--', linewidth=0.4)
+            # plot "expansion" ratio
+            cs = ax.contourf(xx,yy, np.log10(np.abs(expp)), levels=map_levels)#, cmap = 'gist_earth')
+            fig2.colorbar(cs)
+            ax.contour(xx,yy,rr,levels=[0,1],colors='r') # add stability domain
+            ax.set_title('expansion ratio of analytical solution')
+
+        if 1: # Tracé de l'angle
+            fig2, ax = plt.subplots(1,1)
+            # plot des axes Im et Re
+            ax.axhline(0, color=(0,0,0), linestyle='--', linewidth=0.4)
+            ax.axvline(0, color=(0,0,0), linestyle='--', linewidth=0.4)
+            # plot "expansion" ratio
+            cs = ax.contourf(xx,yy, np.angle(expp), levels=map_levels)#, cmap = 'gist_earth')
+            fig2.colorbar(cs)
+            ax.contour(xx,yy,rr,levels=[0,1],colors='r') # add stability domain
+            ax.set_title('expansion ratio of analytical solution')
+
         return pprecision, pprecision2
 
     def compareStabilityDomains(self, list_rk_names):
@@ -260,11 +322,13 @@ class testPrecision:
         # fig, ax = plt.subplots(1,1,dpi=80, figsize=(8, 8*ratio_height_over_width))
         fig, ax = plt.subplots(1,1,dpi=300)
         # plot des axes Im et Re
-        ax.plot([np.min(x), np.max(x)], [0,0], color=(0,0,0), linestyle='--', linewidth=0.4)
-        ax.plot([0,0], [np.min(y), np.max(y)], color=(0,0,0), linestyle='--', linewidth=0.4)
+        ax.axhline(0, color=(0,0,0), linestyle='--', linewidth=0.4)
+        ax.axvline(0, color=(0,0,0), linestyle='--', linewidth=0.4)
+        # ax.plot([np.min(x), np.max(x)], [0,0], color=(0,0,0), linestyle='--', linewidth=0.4)
+        # ax.plot([0,0], [np.min(y), np.max(y)], color=(0,0,0), linestyle='--', linewidth=0.4)
 
         ## Axis description
-        fig.suptitle(f'Domaines de stabilité')
+        # fig.suptitle(f'Domaines de stabilité')
         ax.set_xlabel(r'Re$(\lambda\Delta t)$')
         ax.set_ylabel(r'Im$(\lambda\Delta t)$')
 
@@ -294,31 +358,46 @@ class testPrecision:
             # plt.rcParams['hatch.color']=[0,0,0]
         # add legend
         proxy = [plt.Rectangle((0,0),1,1,fc = colors[i]) for i in range(len(list_rk_names))]
-        ax.legend(proxy, list_rk_names)
+        # ax.legend(proxy, list_rk_names, framealpha=0, loc='lower left')
+        ax.legend(proxy, ['explicit Euler', 'RK4', 'backward Euler', 'Radau5', 'ESDIRK-32a'],
+                  framealpha=0, loc='lower left')
 
-        # ax.axis('equal')
+        ax.axis('square')
+        plt.xlim(-10,15)
 
 if __name__=='__main__':
     import warnings
     warnings.simplefilter("error", np.ComplexWarning) #to ensure we are not dropping complex perturbations
 
     # test = testPrecision(re_min=-100, re_max=100, im_min=0., im_max=100, n_re=1000, n_im=1001) # on aperçoit des formes intriguantes en terme d'iso-contour de précision
-    # test = testPrecision(re_min=-10, re_max=10, im_min=-5, im_max=5, n_re=200, n_im=202)
+    # test = testPrecision(re_min=-5, re_max=15, im_min=-10, im_max=10, n_re=200, n_im=202)
     # test = testPrecision(re_min=-20, re_max=20, im_min=-20, im_max=20, n_re=200, n_im=202)
+    # test = testPrecision(re_min=20, re_max=0, im_min=0, im_max=100, n_re=1000, n_im=1002)
     # test = testPrecision(re_min=-3, re_max=3, im_min=-3, im_max=3, n_re=200, n_im=202)
-    test = testPrecision(re_min=-6, re_max=6, im_min=-6, im_max=6, n_re=200, n_im=202)
+    # test = testPrecision(re_min=-6, re_max=6, im_min=-6, im_max=6, n_re=200, n_im=202)
+    test = testPrecision(re_min=-6, re_max=15, im_min=-8, im_max=8, n_re=200, n_im=202)
 
     #%%
-    # A,b,c = rk_coeffs.getButcher('rk4')
-    A,b,c = rk_coeffs.getButcher('Radau5')
-    # A,b,c = rk_coeffs.getButcher('RadauIIA-5')#'L-SDIRK-33') #SDIRK4()5L[1]SA-1')
-    # tracé du contour de la précision par rapport à l'exponentielle
-    pprecision, pprecision2 = test.plotStabilityRegionRK(A,b,c)
+    # for name in ['ie','crkn','esdirk32a','esdirk43b','rk4','esdirk54a','radau5','rk10']:
+    for name in ['ie', 'esdirk32a', 'esdirk43b', 'esdirk54a', 'radau5', 'rk4']:
+    # for name in ['ie','ee', 'crkn', 'radau5']:
+    # for name in ['ie','rk4','rk10']:
+        A,b,c = rk_coeffs.getButcher(name)
+
+        # tracé du contour de la précision par rapport à l'exponentielle
+        pprecision, pprecision2 = test.plotStabilityRegionRK(A,b,c)
+        plt.suptitle(name)
+
+    raise Exception('stop')
+    #%%
+    name ='radau5'
+    A,b,c = rk_coeffs.getButcher(name)
     R, Rsym = test.computeStabilityFunction(A,b,c, bSympy=False)
 
     # calcul du rayon spectral
     eigvals = np.linalg.eigvals(A)
     rho = np.max(np.abs(eigvals))
+    print(name)
     print('spectral radius: rho=', rho)
     print('R(rho)=', R(rho))
     print('R(1/rho)=', R(1/rho))
@@ -349,15 +428,28 @@ if __name__=='__main__':
     # plt.ylim((1e-1, 1e0))
     plt.show()
 
-
+    ##%%
 
     #%% Comparaison domaines stabilité
-    test.compareStabilityDomains(list_rk_names=['rk4', 'radau5', 'ie','rk10', 'esdirk54a', 'esdirk43b'])
+    # test.compareStabilityDomains(list_rk_names=['rk4', 'radau5', 'ie','rk10', 'esdirk54a', 'esdirk43b'])
+    # test.compareStabilityDomains(list_rk_names=['EE','RK4'])
+    test.compareStabilityDomains(list_rk_names=['ee','ie'])
+    plt.axis('square')
+    plt.xlim(-5,1)
+    plt.ylim(-3,3)
+    plt.savefig('stab_RK_explicites.png',dpi=300)
+
+
+    # test.compareStabilityDomains(list_rk_names=['IE', 'Radau5', 'ESDIRK32a'])
+    # plt.savefig('stab_RK_implicites.png',dpi=300)
 
     #%% Plot comparison of precision zone along the real axis
+
     polys=[]
-    # names = ['ie','rk4','rk10', 'radau5', 'esdirk54a']#, 'ESDIRK43B', 'ESDIRK32A']
-    names = ['ie', 'esdirk32a', 'radau5']#, 'ESDIRK43B', 'ESDIRK32A']
+    # names = ['ee','rk4','rk10']#, 'radau5', 'esdirk54a', 'ESDIRK43B', 'ESDIRK32A']
+    names =['ee', 'ie', 'rk4', 'radau5']
+    # names = ['radau5', 'esdirk54a', 'ESDIRK43B', 'ESDIRK32A']
+    # names = ['ie', 'esdirk32a', 'radau5']#, 'ESDIRK43B', 'ESDIRK32A']
     for name in names:
         print(name)
         A,b,c = rk_coeffs.getButcher(name)
@@ -369,43 +461,47 @@ if __name__=='__main__':
 
 
 
-    # Tracé de l'évolution de la précision le long de l'axe réel
-    z_vec = np.linspace(-6,8,10000)
+    #%% Tracé de l'évolution de la précision le long de l'axe réel
+    z_vec = np.linspace(-3,3,10000)
     th_sol = np.exp(z_vec)
     for i in range(2):
-      fig,ax = plt.subplots(1,1,sharex=True)
+      fig,ax = plt.subplots(1,1,dpi=200,sharex=True)
       ax=[ax]
       for j,p in enumerate(polys):
           r = p[0](z_vec)
           error = (r - th_sol)
           if i==0: # relative à l'exponentielle
             relativPrecision = np.abs(error/th_sol)
-            description = "précision de la sol numérique par rapport à l'exponentielle"
+            description = "précision de la solution numérique\npar rapport à l'exponentielle"
           else: # relative à la sol num
               relativPrecision = np.abs(error/r)
-              description = "précision de l'exponentielle par rapport à la solution numérique"
+              description = "précision de l'exponentielle\npar rapport à la solution numérique"
           ax[0].semilogy(z_vec, relativPrecision, label=names[j])
-      ax[0].set_ylim( 1e-15, 1e10)
+      ax[0].set_ylim(1e-8, 1e2)
       ax[0].set_title(description)
       ax[0].legend()
-      ax[0].set_ylabel('précision')
-      ax[0].set_xlabel('z')
+      ax[0].set_ylabel('relative error')
+      ax[0].set_xlabel(r'$\lambda \Delta t$')
       ax[0].grid(which='both', axis='both')
-      
-    # Tracé de l'évolution de R(z) le long de l'axe réel
-    z_vec = np.linspace(-6,8,10000)
+
+    #%% Tracé de l'évolution de R(z) le long de l'axe réel
+    z_vec = np.linspace(-10,5,10000)
     th_sol = np.exp(z_vec)
     for i in range(2):
-      fig,ax = plt.subplots(1,1,sharex=True)
+      fig,ax = plt.subplots(1,1,dpi=200,figsize=(7,5),sharex=True)
       ax=[ax]
+      ax[0].plot(z_vec, np.exp(z_vec), linestyle='-', color=[0,0,0], label='$\exp(z)$')
+      ax[0].axhline(1, linestyle='--', color=[0,0,0], label='$|R(z)|=1$')
       for j,p in enumerate(polys):
-          r = p[0](z_vec)          
+          r = p[0](z_vec)
           ax[0].semilogy(z_vec, np.abs(r), label=names[j])
-      # ax[0].set_ylim( 1e-15, 1e10)
-      ax[0].legend()
-      ax[0].set_ylabel('|R(z)|')
-      ax[0].set_xlabel('z')
+      
+      ax[0].set_ylim( 1e-2, 1e2)
+      ax[0].legend(framealpha=0)
+      ax[0].set_ylabel('$|R(z)|$')
+      ax[0].set_xlabel('$z$')
       ax[0].grid(which='both', axis='both')
+      ax[0].set_title('Module de la fonction de stabilité $R(z)$')
 
     #%% Comparaison entre embedded methods
     polys=[]

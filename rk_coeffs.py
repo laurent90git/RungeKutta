@@ -27,7 +27,7 @@ def getButcher(name):
     b= np.array([1])
   elif name=='CRKN': # Crank-Nicolson
     A= np.array([[0, 0],
-                 [0, 1]])
+                 [1/2, 1/2]])
     c= np.array([0, 1])
     b= np.array([1/2, 1/2])
   elif name=='L-SDIRK-22-QZ': #Qin and Zhang
