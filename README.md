@@ -6,8 +6,9 @@ Dynamic time step adaptation is implemented for explicit embedded methods.
 
 A script is also provided to study the stability domains, order stars and relative precision contours of any Runge-Kutta scheme. Here is the result for the well-known Radau5 scheme:
 
+<p align="center">
 <img src="https://raw.githubusercontent.com/laurent90git/RungeKutta/91b5c1effac3c54d9baf2a46cf79dacfa87c23cc/img/radau5.png" width="500"/>
-
+</p>
 # TODO:
 - time step adaptation:
 	- Shampine's trick to L-stabilize the error estimate if necessary
