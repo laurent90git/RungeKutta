@@ -16,6 +16,7 @@ matplotlib.rcParams['text.latex.preamble']=[r"\usepackage{amsmath}"]
 
 
 import rk_coeffs
+from rk_coeffs import reverseRK
 import sympy as sp
 sp.init_printing()
 from sympy.utilities import lambdify
@@ -36,8 +37,9 @@ class testPrecision:
         self.re_xx, self.im_yy = np.meshgrid(self.re, self.im)
         self.eigvals = self.re_xx + 1j*self.im_yy
 
-    def computeStabilityFunction(self, A,b,c, bSympy=True):
+    def computeStabilityFunction(self, method, bSympy=True):
         """ returns the stability function R(z) of the Runge-Kutta methods defined by A,b,c """
+        A,b,c = method['A'], method['b'], method['c']
         s = np.size(b)
         if bSympy:  # use symbolic computations to improve speed (effective for low number of stages)
           s = b.size # nombre d'étages
@@ -64,15 +66,16 @@ class testPrecision:
           R=np.vectorize(Rlbda)
           Rsym=None
         return R, Rsym
+        
 
-    def plotOrderStars(self, A,b,c):
+    def plotOrderStars(self, method):
         """ Plots the order star of the RK method, i.e. the locus such that |R(z)|/|exp(z)|=1"""
         xx,yy = self.re_xx, self.im_yy
         zz = self.eigvals
         x= self.re
         y= self.im
 
-        Rfun, Rsym = self.computeStabilityFunction(A,b,c)
+        Rfun, Rsym = self.computeStabilityFunction(method)
         RR   = Rfun(zz) # solution RK
         expp = np.exp(self.eigvals) # solution analytique
         rr = np.abs(RR) # ratio d'augmentation
@@ -132,14 +135,18 @@ class testPrecision:
 
 
 
-    def plotStabilityRegionRK(self, A,b,c):
+    def plotStabilityRegionRK(self, method, bAdditionalPlots=True, bSympy=True):
         # Contour de la précision / stabilité
+        A,b,c = method['A'], method['b'], method['c']
+        methodname = method['name']
         xx,yy = self.re_xx, self.im_yy
         zz = self.eigvals
         x= self.re
         y= self.im
 
-        Rfun, Rsym = self.computeStabilityFunction(A,b,c,bSympy=np.size(b)<6)
+#        Rfun, Rsym = self.computeStabilityFunction(A,b,c,bSympy=np.size(b)<6)
+        Rfun, Rsym = self.computeStabilityFunction(method, bSympy=bSympy)
+
         RR   = Rfun(zz) # solution RK
         expp = np.exp(self.eigvals) # solution analytique
         rr = np.abs(RR) # ratio d'augmentation
@@ -150,8 +157,8 @@ class testPrecision:
         pprecision2 = 100*np.abs((RR-expp)/RR) # précision en pourcents par rapport à la solution numérique
         pprecision3 = np.minimum(pprecision1,pprecision2)
         # map_levels = np.linspace(-5,5,50)
-        # map_levels = np.linspace(-6,6,50)
-        map_levels = np.linspace(-3,3,50)
+        map_levels = np.linspace(-5,4,20)
+        # map_levels = np.linspace(-3,3,50)
         # map_levels = np.hstack((-99, map_levels, 99))
         cmap=None
 
@@ -202,7 +209,7 @@ class testPrecision:
                 ax.clabel(level_contour, inline=1, fontsize=10,  fmt='%1.0e')
 
             ## Axis description
-            fig.suptitle(f'Domaine de stabilité (rouge), order star (bleu),\niso-contour de précision (\%) et map de la précision (log10) par rapport à {name}')
+            fig.suptitle(f'{methodname}: domaine de stabilité (rouge), order star (bleu),\niso-contour de précision (\%) et map de la précision (log10) par rapport à {name}')
             ax.set_xlabel(r'Re$(\lambda\Delta t)$')
             ax.set_ylabel(r'Im$(\lambda\Delta t)$')
 
@@ -238,6 +245,66 @@ class testPrecision:
 
 
             # ax.axis('equal')
+        if  bAdditionalPlots:
+            temp = np.isnan(expp)
+            if np.any(temp): # NaNs dans les résultats
+                print('issue in theoretical result')
+                fig2, ax = plt.subplots(1,1)
+                # plot des axes Im et Re
+                ax.plot([np.min(x), np.max(x)], [0,0], color=(0,0,0), linestyle='--', linewidth=0.4)
+                ax.plot([0,0], [np.min(y), np.max(y)], color=(0,0,0), linestyle='--', linewidth=0.4)
+                # plots overflow region
+                map_levels = np.array([0.,0.5, 1.5])
+                cs            = ax.contourf(xx,yy, 1.0*temp, levels=map_levels)#, cmap = 'gist_earth')
+                fig2.colorbar(cs)
+                fig2.suptitle('emplacement des NaNs dans exp(z)')
+    
+            if 1: # Tracé de l'expansion de la solution numérique
+                fig2, ax = plt.subplots(1,1)
+                # plot des axes Im et Re
+                ax.plot([np.min(x), np.max(x)], [0,0], color=(0,0,0), linestyle='--', linewidth=0.4)
+                ax.plot([0,0], [np.min(y), np.max(y)], color=(0,0,0), linestyle='--', linewidth=0.4)
+    
+                # plot "expansion" ratio
+                map_levels = np.array(np.linspace(-3,3,50)) #np.logspace(-3,3,20)
+                cs = ax.contourf(xx,yy, np.log10(rr), levels=map_levels)#, cmap = 'gist_earth')
+                # map_levels = np.array(np.logspace(0,3,20))
+                # cs = ax.contourf(xx,yy, rr, levels=map_levels)#, cmap = 'gist_earth')
+                fig2.colorbar(cs)
+                ax.contour(xx,yy,rr,levels=[0,1],colors='r') # add stability domain
+                ax.set_title('Numerical expansion ratio $\log_{10}(|R(z)|)$')
+    
+            
+            if 1: # tracé de l'expansion pour la solution exacte
+                fig2, ax = plt.subplots(1,1)
+                # plot des axes Im et Re
+                ax.axhline(0, color=(0,0,0), linestyle='--', linewidth=0.4)
+                ax.axvline(0, color=(0,0,0), linestyle='--', linewidth=0.4)
+                # plot "expansion" ratio
+                cs = ax.contourf(xx,yy, np.log10(np.abs(expp)), levels=map_levels)#, cmap = 'gist_earth')
+                fig2.colorbar(cs)
+                ax.contour(xx,yy,rr,levels=[0,1],colors='r') # add stability domain
+                ax.set_title('exact expansion ratio $\log_{10}(|\exp(z)|)$')
+    
+            if 1: # Tracé de l'angle de R(z) pour la solution numérique
+                fig2, ax = plt.subplots(1,1)
+                ax.axhline(0, color=(0,0,0), linestyle='--', linewidth=0.4)
+                ax.axvline(0, color=(0,0,0), linestyle='--', linewidth=0.4)
+                cs = ax.contourf(xx,yy, np.angle(RR), levels=50, cmap='hsv')
+                fig2.colorbar(cs)
+                ax.contour(xx,yy,rr,levels=[0,1],colors='r') # add stability domain
+                ax.set_title('phase of $R(z)$')
+                
+            if 1: # Tracé de l'angle pour la solution exacte
+                fig2, ax = plt.subplots(1,1)
+                # plot des axes Im et Re
+                ax.axhline(0, color=(0,0,0), linestyle='--', linewidth=0.4)
+                ax.axvline(0, color=(0,0,0), linestyle='--', linewidth=0.4)
+                cs = ax.contourf(xx,yy, np.angle(expp), levels=50, cmap='hsv')
+                fig2.colorbar(cs)
+                ax.contour(xx,yy,rr,levels=[0,1],colors='r') # add stability domain
+                ax.set_title('phase of $\exp(z)$')
+        plt.show()
 
         temp = np.isnan(expp)
         if np.any(temp):
@@ -320,7 +387,7 @@ class testPrecision:
 
         # ratio_height_over_width = np.abs( (np.max(y)-np.min(y))/(np.max(x)-np.min(x)) )
         # fig, ax = plt.subplots(1,1,dpi=80, figsize=(8, 8*ratio_height_over_width))
-        fig, ax = plt.subplots(1,1,dpi=300)
+        fig, ax = plt.subplots(1,1,figsize=(6,6),dpi=300)
         # plot des axes Im et Re
         ax.axhline(0, color=(0,0,0), linestyle='--', linewidth=0.4)
         ax.axvline(0, color=(0,0,0), linestyle='--', linewidth=0.4)
@@ -335,12 +402,12 @@ class testPrecision:
         colors = ['tab:blue', 'tab:orange', 'tab:green', 'tab:red', 'tab:purple', 'tab:brown', 'tab:pink', 'tab:gray', 'tab:olive', 'tab:cyan']
         for i,name in enumerate(list_rk_names):
             print(name)
-            A,b,c = rk_coeffs.getButcher(name)
-            if np.size(b)>6:
+            method = rk_coeffs.getButcher(name)
+            if np.size(method['b'])>6:
               bSympy=False # c'est plus rapide d'éviter Sympy, on dirait qu'il n'arrive pas à calculer les détermiannts analytiquement...
             else:
               bSympy=True
-            Rfun, Rsym = self.computeStabilityFunction(A,b,c,bSympy=bSympy)
+            Rfun, Rsym = self.computeStabilityFunction(method, bSympy=bSympy)
             RR   = Rfun(zz)
             rr = np.abs(RR) # ratio d'augmentation
 
@@ -366,9 +433,11 @@ class testPrecision:
         plt.xlim(-10,15)
 
 if __name__=='__main__':
+    # Setup warnings such that any problem with complex number raises an error
     import warnings
     warnings.simplefilter("error", np.ComplexWarning) #to ensure we are not dropping complex perturbations
 
+    # Choose the area of the complex plane that will be analysed
     # test = testPrecision(re_min=-100, re_max=100, im_min=0., im_max=100, n_re=1000, n_im=1001) # on aperçoit des formes intriguantes en terme d'iso-contour de précision
     # test = testPrecision(re_min=-5, re_max=15, im_min=-10, im_max=10, n_re=200, n_im=202)
     # test = testPrecision(re_min=-20, re_max=20, im_min=-20, im_max=20, n_re=200, n_im=202)
@@ -388,14 +457,24 @@ if __name__=='__main__':
         pprecision, pprecision2 = test.plotStabilityRegionRK(A,b,c)
         plt.suptitle(name)
 
+    #%% Tracé des zones de stabilité, contour de précision...
+    
+    # for name in ['ie','crkn','esdirk32a','esdirk43b','rk4','esdirk54a','radau5']:
+    for name in ['ie','rk4','radau5']:
+        method = rk_coeffs.getButcher(name)
+
+        # tracé du contour de la précision par rapport à l'exponentielle
+        pprecision, pprecision2 = test.plotStabilityRegionRK(method, bAdditionalPlots=True)
+        plt.suptitle(name)
+
     raise Exception('stop')
-    #%%
+    #%% Calculs spécifiques
     name ='radau5'
-    A,b,c = rk_coeffs.getButcher(name)
-    R, Rsym = test.computeStabilityFunction(A,b,c, bSympy=False)
+    method = rk_coeffs.getButcher(name)
+    R, Rsym = test.computeStabilityFunction(method, bSympy=True)
 
     # calcul du rayon spectral
-    eigvals = np.linalg.eigvals(A)
+    eigvals = np.linalg.eigvals(method['A'])
     rho = np.max(np.abs(eigvals))
     print(name)
     print('spectral radius: rho=', rho)
@@ -403,10 +482,9 @@ if __name__=='__main__':
     print('R(1/rho)=', R(1/rho))
     print('R(1/rho + 1e-6)=', R(1/rho + 1e-6))
 
-#%%
 
-    #%% tracé des order stars
-    test.plotOrderStars(A,b,c)
+    #% tracé des order stars
+    test.plotOrderStars(method)
 
     #%% estimate R(+\infty)
     # avec Sympy, la limite est calculable analytiquement (avec R ou Rsym)
@@ -416,7 +494,7 @@ if __name__=='__main__':
       print('R(+1j*infty)=', R(1j*1e99)) #1j*np.inf ne marche pas en Sympy (donne un NaN)
     except:
       pass
-    z_vec = np.logspace(-10,10,100000)
+    z_vec = np.logspace(-10,10,10000)
     Rvalues = R(z_vec)
 
     plt.figure()
@@ -440,9 +518,6 @@ if __name__=='__main__':
     plt.savefig('stab_RK_explicites.png',dpi=300)
 
 
-    # test.compareStabilityDomains(list_rk_names=['IE', 'Radau5', 'ESDIRK32a'])
-    # plt.savefig('stab_RK_implicites.png',dpi=300)
-
     #%% Plot comparison of precision zone along the real axis
 
     polys=[]
@@ -450,14 +525,18 @@ if __name__=='__main__':
     names =['ee', 'ie', 'rk4', 'radau5']
     # names = ['radau5', 'esdirk54a', 'ESDIRK43B', 'ESDIRK32A']
     # names = ['ie', 'esdirk32a', 'radau5']#, 'ESDIRK43B', 'ESDIRK32A']
+    # names = ['reversed-RK23', 'reversed-RK4', 'reversed-RK45',
+              # 'reversed-RK10', 'radau5', 'RK10']
+    # names = ['reversed-RK45-4', 'reversed-RK45-5', 'RK45']
+
     for name in names:
         print(name)
-        A,b,c = rk_coeffs.getButcher(name)
-        if np.size(b)>6:
+        method = rk_coeffs.getButcher(name)
+        if np.size(method['b'])>6:
           bSympy=False # c'est plus rapide d'éviter Sympy, on dirait qu'il n'arrive pas à calculer les détermiannts analytiquement...
         else:
           bSympy=True
-        polys.append( test.computeStabilityFunction(A,b,c, bSympy=bSympy) )
+        polys.append( test.computeStabilityFunction(method, bSympy=bSympy) )
 
 
 
@@ -497,7 +576,7 @@ if __name__=='__main__':
           ax[0].semilogy(z_vec, np.abs(r), label=names[j])
       
       ax[0].set_ylim( 1e-2, 1e2)
-      ax[0].legend(framealpha=0)
+      ax[0].legend(framealpha=0.5)
       ax[0].set_ylabel('$|R(z)|$')
       ax[0].set_xlabel('$z$')
       ax[0].grid(which='both', axis='both')
@@ -505,15 +584,18 @@ if __name__=='__main__':
 
     #%% Comparaison entre embedded methods
     polys=[]
-    names = ['esdirk54a', 'ESDIRK54A-V4']
+    # names = ['esdirk54a', 'ESDIRK54A-V4']
+    names = ['ESDIRK43B-3', 'ESDIRK43B']
+    # names = ['RK45', 'ESDIRK54A-V4']
     for name in names:
         print(name)
-        A,b,c = rk_coeffs.getButcher(name)
-        if np.size(b)>6:
-          bSympy=False # c'est plus rapide d'éviter Sympy, on dirait qu'il n'arrive pas à calculer les détermiannts analytiquement...
-        else:
-          bSympy=True
-        polys.append( test.computeStabilityFunction(A,b,c, bSympy=bSympy) )
+        method = rk_coeffs.getButcher(name)
+        # if np.size(method['b'])>6:
+        #   bSympy=False # c'est plus rapide d'éviter Sympy, on dirait qu'il n'arrive pas à calculer les détermiannts analytiquement...
+        # else:
+        #   bSympy=True
+        bSympy=True
+        polys.append( test.computeStabilityFunction(method, bSympy=bSympy) )
 
     z_vec = np.linspace(-6,8,10000)
     th_sol = np.exp(z_vec)
@@ -528,6 +610,7 @@ if __name__=='__main__':
         error = (r - r_ref)
         relativPrecision = np.abs(error/r_ref)
         ax[0].semilogy(z_vec, relativPrecision, label=names[j])
+        ax[0].axhline(1, label=None, color='tab:red', linestyle='--')
     ax[0].set_ylim( 1e-15, 1e10)
     ax[0].set_title('erreur relative (vs {})'.format(names[0]))
     ax[0].legend()
@@ -538,14 +621,14 @@ if __name__=='__main__':
 
     #%% Tracé de l'évolution de la précision le long de l'axe réel (version log)
     for i in range(3): # boucle sur la référence prise pour la précision (num ou analytique)
-      fig,ax = plt.subplots(2,1,sharex=True)
+      fig,ax = plt.subplots(2,1,figsize=(7,5),sharex=True)
       for k in range(2): # boucle sur le demi-plan considéré (Re>0 ou Re<0)
         if k==0: # Re(z)>0
           z_vec = np.logspace(-10,2,500)
-          title='Re(z)>0'
+          title='$Re(z)>0$'
         else:
           z_vec = -np.logspace(-10,20,500)
-          title='Re(z)<0'
+          title='$Re(z)<0$'
         for j,p in enumerate(polys): # boucle sur les méthodes RK
           r = p[0](z_vec)
           th_sol = np.exp(z_vec)
@@ -567,6 +650,6 @@ if __name__=='__main__':
         ax[k].grid(which='both', axis='both')
         ax[k].set_ylim(1e-16, 1e5)
       fig.suptitle(description)
-      ax[-1].set_xlabel('|Re(z)|')
+      ax[-1].set_xlabel('$|Re(z)|$')
       ax[0].legend(ncol=2)
-      # C'est bizarre, les méthodes ESDIRK ne semblent aps L-stables, puisque l'erreur absolue ne tend pas vers 0 lorsque Re(z)-->-inf...
+      # C'est bizarre, les méthodes ESDIRK ne semblent pas L-stables, puisque l'erreur absolue ne tend pas vers 0 lorsque Re(z)-->-inf...

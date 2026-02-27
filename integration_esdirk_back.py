@@ -8,7 +8,7 @@ import scipy.interpolate
 from damped_newton import damped_newton_solve
 import newton
 
-NEWTONCHOICE=3 #0: Scipy's fsolve 1: Scipy's newton (bad !), 2: custom damped Newton, 3: custom undamped quasi-Newton (weirdly works better than the damped one...)
+NEWTONCHOICE=2 #0: Scipy's fsolve 1: Scipy's newton (bad !), 2: custom damped Newton, 3: custom undamped quasi-Newton (weirdly works better than the damped one...)
 
 def inverseERKintegration(fun, y0, t_span, nt, method, jacfun=None, bPrint=True,
                           vectorized=False, fullDebug=False, bPlotSubsteps=False):
@@ -81,10 +81,14 @@ def inverseERKintegration(fun, y0, t_span, nt, method, jacfun=None, bPrint=True,
             return res, Y
         else:
             return res
-
+    
+    ## skirmish
+    # bStifflyAccurate = np.all(b==A[-1,:]) # then the last stage is the solution at the next time point
+    
     ## advance in time
     out.nfev = 0
     out.njev = 0
+    K= np.zeros((n, s), order='F')
     unm1 = np.copy(y0)
     # At = A.T
     warm_start_dict = None
@@ -155,12 +159,10 @@ def inverseERKintegration(fun, y0, t_span, nt, method, jacfun=None, bPrint=True,
     # out.y_substeps = y_substeps # last substeps
     return out
 
-def adaptiveInverseERKintegration(fun, y0, t_span, method, method2=None,
-                                  atol=None,rtol=None,max_step=np.inf, first_step=None,
+def adaptiveInverseERKintegration(fun, y0, t_span, method,
+                                  atol,rtol,max_step=np.inf, first_step=None,
                                   jacfun=None, bPrint=True,
-                                  vectorized=False, fullDebug=False, plotStagesAfter=np.inf,
-                                  bImplicitEmbedded=False,
-                                  nmax_steps=np.inf):
+                                  vectorized=False, fullDebug=False, bPlotSubsteps=False):
     """ Performs the integration of the system dy/dt = f(t,y)*
         with a reversed explicit RK method
         from t=t_span[0] to t_span[1], with initial condition y(t_span[0])=y0.
@@ -178,10 +180,11 @@ def adaptiveInverseERKintegration(fun, y0, t_span, method, method2=None,
     out = scipy.integrate._ivp.ivp.OdeResult()
     t = np.linspace(t_span[0], t_span[1], nt)
 
+    A,b,c = method['A'], method['b'], method['c'] # Butcher coefficients
 
     n = y0.size # size of the problem
     dt = (t_span[1]-t_span[0]) / (nt-1) # time step
-    # s = np.size(b) # number of stages for the RK method
+    s = np.size(b) # number of stages for the RK method
 
     
     y = np.zeros((n, nt)) # solution accros all time steps
@@ -206,13 +209,10 @@ def adaptiveInverseERKintegration(fun, y0, t_span, method, method2=None,
                 return res
     
     ## define the residual function
-    def resfun(ynp1,yn,tn,dt,method,return_substeps=False):
+    def resfun(ynp1,yn,tn,dt,A,n,s, return_substeps=False):
         """ Residuals for the substeps.
         The input is Y = (y0[...], y1[...], ...).T """
         # 1 - compute reverse stages explicitly
-        A,b,c = method['A'], method['b'], method['c'] # Butcher coefficients
-        n = yn.size
-        s = b.size
         Y = np.zeros((n,s), order='F')
         for i in range(s):
             Y[:,i] = ynp1
@@ -229,7 +229,7 @@ def adaptiveInverseERKintegration(fun, y0, t_span, method, method2=None,
         # 2 - compute residuals as a matrix (one row for each step)
         res = ynrev - yn
         if return_substeps:
-            return res, Y, ynrev
+            return res, Y
         else:
             return res
     
@@ -237,6 +237,7 @@ def adaptiveInverseERKintegration(fun, y0, t_span, method, method2=None,
     ## advance in time
     out.nfev = 0
     out.njev = 0
+    K= np.zeros((n, s), order='F')
     unm1 = np.copy(y0)
     # At = A.T
     warm_start_dict = None
@@ -244,9 +245,9 @@ def adaptiveInverseERKintegration(fun, y0, t_span, method, method2=None,
     out.infodict_hist = infodict_hist
     
     
-    rtol_newton=1e-9 #min(1e-5,rtol/10)
-    atol_newton=0 #min(1e-5,atol/10)
-    ftol_newton=1e-15
+    rtol_newton=min(1e-5,rtol/10)
+    atol_newton=min(1e-5,rtol/10)
+    ftol_newton=1e-30
     
     if first_step is None:
       # estimate first step following Hairer & Wanner's book
@@ -272,9 +273,6 @@ def adaptiveInverseERKintegration(fun, y0, t_span, method, method2=None,
     # error_estimate = np.zeros((n,))
     while tn < tf:
         nt_performed = nt_accepted+nt_rejected
-        if nt_accepted>=nmax_steps:
-            print('Maximum number of steps reached')
-            break
         if bPrint: # print progress
           if np.mod(nt_performed,100)==0:
               print('\nt={:.10e} '.format(tn), end='')
@@ -288,11 +286,11 @@ def adaptiveInverseERKintegration(fun, y0, t_span, method, method2=None,
               raise Exception('dt<1e-15 --> stopping to avoid underflows')
             try:
                 yini = unm1[:]
-                ynp1_1, infodict, warm_start_dict = damped_newton_solve(
-                                                    fun=lambda x: resfun(ynp1=x,yn=unm1, tn=tn, dt=dt,method=method),
+                newY, infodict, warm_start_dict = damped_newton_solve(
+                                                    fun=lambda x: resfun(ynp1=x,yn=unm1, tn=tn, dt=dt, A=A, n=n, s=s),
                                                     x0=np.copy(yini), rtol=rtol_newton, atol=atol_newton, ftol=ftol_newton,
                                                     jacfun=None, warm_start_dict=warm_start_dict,
-                                                    itmax=100, jacmax=2, tau_min=1e-4, convergenceMode=0,
+                                                    itmax=100, jacmax=20, tau_min=1e-4, convergenceMode=0,
                                                     bPrint=fullDebug)
                 out.nfev += infodict['nfev']
                 out.njev += infodict['njev']
@@ -307,100 +305,41 @@ def adaptiveInverseERKintegration(fun, y0, t_span, method, method2=None,
               nt_rejected+=1
               continue # restart at the beginning of the while loop with a new dt value
 
-            if method2 is None:
-                # get the substeps to retrieve the error estimate                    
-                res, ysubsteps, yn_1 = resfun(ynp1=ynp1_1, yn=unm1, tn=tn, dt=dt,
-                                              method=method, return_substeps=True)
-    
-                # WE COMPARE THE ERROR AT TN not TNP1 !!!!!!!
-                if method['embedded']['i_high']>=0:
-                    high_order_sol = ysubsteps[:,method['embedded']['i_high']]
-                else:
-                    high_order_sol = ynp1_1
-                if method['embedded']['i_low']>=0:
-                    low_order_sol  = ysubsteps[:,method['embedded']['i_low']]
-                else:
-                    low_order_sol = ynp1_1
-                
-                error_order = method['embedded']['p_low'] # ordre de l'estimateur d'erreur (global)
-                error_estimate = high_order_sol - low_order_sol
+            # get the substeps to retrieve the error estimate
+            res, ysubsteps = resfun(ynp1=newY,yn=unm1, tn=tn, dt=dt, A=A, n=n, s=s, return_substeps=True)
 
+            # WE COMPARE THE ERROR AT TN not TNP1 !!!!!!!
+            if method['embedded']['i_high']>=0:
+                high_order_sol = ysubsteps[:,method['embedded']['i_high']]
             else:
-                # compute explicitly the other methods (backwards), starting from the same ynp1
-                if bImplicitEmbedded: # solve the embedded method implicitly
-                    print('implicit embedded step')
-                    try:
-                        yini = ynp1_1[:]
-                        ynp1_2, infodict, warm_start_dict = damped_newton_solve(
-                                                            fun=lambda x: resfun(ynp1=x, yn=unm1, tn=tn, dt=dt, method=method2),
-                                                            x0=np.copy(yini), rtol=rtol_newton, atol=atol_newton, ftol=ftol_newton,
-                                                            jacfun=None, warm_start_dict=None,
-                                                            itmax=10, jacmax=3, tau_min=1e-4, convergenceMode=0,
-                                                            bPrint=fullDebug)
-                        out.nfev += infodict['nfev']
-                        out.njev += infodict['njev']
-                        if infodict['ier']!=0: # Newton did not converge
-                            raise Exception('Newton did not converge\n\t--> reducing time step')
-                            
-                    except Exception as e:
-                      print('Issue during embedded step: {}'.format(e))
-                      raise e
-                      
-                    res,  ysubsteps,  yn_1 = resfun(ynp1=ynp1_1, yn=unm1, tn=tn, dt=dt, method=method,  return_substeps=True)
-                    res2, ysubsteps2, yn_2 = resfun(ynp1=ynp1_2, yn=unm1, tn=tn, dt=dt, method=method2, return_substeps=True)
-                
-                    # WE COMPARE THE ERROR AT TN not TNP1 !!!!!!!
-                    if method['order']>method2['order']:
-                        high_order_sol = ynp1_1
-                        low_order_sol  = ynp1_2
-                    else:
-                        high_order_sol = ynp1_2
-                        low_order_sol  = ynp1_1
-                        if method['order']==method2['order']:
-                            print('Both methods have the same order... We assume they have different error constants ?')
-                    error_order = min(method['order'], method2['order'])
-                    error_estimate = high_order_sol - low_order_sol
-                else: # apply embedded scheme backwards and compare the yn's
-                    ynp1_2 = ynp1_1
-                    res,  ysubsteps,  yn_1 = resfun(ynp1=ynp1_1, yn=unm1, tn=tn, dt=dt, method=method,  return_substeps=True)
-                    res2, ysubsteps2, yn_2 = resfun(ynp1=ynp1_2, yn=unm1, tn=tn, dt=dt, method=method2, return_substeps=True)
-                
-                    # WE COMPARE THE ERROR AT TN not TNP1 !!!!!!!
-                    if method['order']>method2['order']:
-                        high_order_sol = yn_1
-                        low_order_sol  = yn_2
-                    else:
-                        high_order_sol = yn_2
-                        low_order_sol  = yn_1
-                        if method['order']==method2['order']:
-                            print('Both methods have the same order... We assume they have different error constants ?')
-                    error_order = min(method['order'], method2['order'])
-                    error_estimate = high_order_sol - low_order_sol
- 
-            if nt_accepted>=plotStagesAfter:
-                time_stages = tn + (1-method['c'])*dt
+                high_order_sol = newY
+            if method['embedded']['i_low']>=0:
+                low_order_sol  = ysubsteps[:,method['embedded']['i_low']]
+            else:
+                low_order_sol = newY
+
+            time_stages = tn + (1-method['c'])*dt
+            if bPlotSubsteps:
                 plt.figure()
-                plt.plot(time_stages,ysubsteps[0,:], marker='.', label='sol1: y0')
-                # plt.plot(time_stages,ysubsteps[1,:], marker='.', label='sol1: y1')
-                if not ( method2 is None ):
-                    time_stages2 = tn + (1-method2['c'])*dt
-                    plt.plot(time_stages2,ysubsteps2[0,:], marker='.', label='sol2: y')
-                    # plt.plot(time_stages,ysubsteps2[1,:], marker='.', label='sol2: y1')
-                # plt.plot( tn*np.ones(n), unm1, marker='o', label='yn', linestyle='')
-                plt.plot( (tn+dt)*np.ones(n), ynp1_1, marker='o', label='ynp1', linestyle='')
-                plt.plot( (tn)*np.ones(n), low_order_sol, marker='x', label='low', linestyle='')
-                plt.plot( (tn)*np.ones(n), high_order_sol, marker='+', label='high', linestyle='')
+                plt.plot(time_stages,ysubsteps[0,:], marker='.', label='y0')
+                plt.plot(time_stages,ysubsteps[1,:], marker='.', label='y1')
+                plt.plot( tn*np.ones(n), unm1, marker='o', label='yn', linestyle='')
+                plt.plot( (tn+dt)*np.ones(n), newY, marker='o', label='yn', linestyle='')
+                plt.plot( (tn)*np.ones(n), low_order_sol, marker='o', label='low', linestyle='')
+                plt.plot( (tn)*np.ones(n), high_order_sol, marker='o', label='high', linestyle='')
                 plt.grid()
                 plt.legend()
                 plt.xlabel('t')
                 plt.ylabel('y')
                 raise Exception('stop')
+            error_estimate = high_order_sol - low_order_sol
+            error_order = method['embedded']['p_low'] # ordre de l'estimateur d'erreur (global)
             
-            tol_vec = atol + rtol*abs(unm1) #np.maximum(abs(ynp1_1),abs(unm1))
-            err_vec = error_estimate / tol_vec
+            tol = atol + rtol*np.abs(np.maximum(newY,unm1))
+            err_vec = error_estimate/tol
 
             # estimation de l'erreur, basé sur Hairer/Norsett/Wanner, Solving ODEs vol I, page 167/168
-            err = np.linalg.norm( err_vec, ord=2 ) / np.sqrt(err_vec.size)
+            err = np.linalg.norm( err_vec ) / np.sqrt(err_vec.size)
 
             if bPrint:
               print('|err|={:.2e}'.format(err))
@@ -421,8 +360,8 @@ def adaptiveInverseERKintegration(fun, y0, t_span, method, method2=None,
         # we found an acceptable time step value, we can now move forward to the next time step
         tn = tn+dt
         tsol.append(tn)
-        ysol.append(np.copy(ynp1_1))
-        unm1[:] = ynp1_1
+        ysol.append(np.copy(newY))
+        unm1[:] = newY
         nt_accepted+=1
         
         # take the new optimal time step lentgh, and ensure we respect the different bounds
@@ -667,7 +606,6 @@ def ERK_integration(fun, y0, t_span, nt, method, bPrint=True):
 
 
 def FIRK_integration(fun, y0, t_span, nt, method, jacfun=None, bPrint=True, vectorized=False,newtonchoice=NEWTONCHOICE,
-                     mass_matrix=None,
                      fullDebug=False):
     """ Performs the integration of the system dy/dt = f(t,y)
         from t=t_span[0] to t_span[1], with initial condition y(t_span[0])=y0.
@@ -697,11 +635,6 @@ def FIRK_integration(fun, y0, t_span, nt, method, jacfun=None, bPrint=True, vect
 
     y = np.zeros((n, nt)) # solution accros all time steps
     y[:,0] = y0
-    
-    bDAE = True
-    if mass_matrix is None:
-      bDAE = False
-      mass_matrix = np.eye(y0.size)
 
     ## make sure the function is vectorised
     if vectorized:
@@ -715,7 +648,7 @@ def FIRK_integration(fun, y0, t_span, nt, method, jacfun=None, bPrint=True, vect
                 if not (isinstance(t, np.ndarray)):
                     t = t*np.ones((x.shape[1]))
                 res0 = fun(t[0],x[:,0])
-                res = np.zeros((res0.shape[0],x.shape[1]), dtype=x.dtype)
+                res = np.zeros((res0.shape[0],x.shape[1]))
                 res[:,0]=res0
                 for i in range(1,x.shape[1]):
                     res[:,i] = fun(t[i],x[:,i])
@@ -728,7 +661,7 @@ def FIRK_integration(fun, y0, t_span, nt, method, jacfun=None, bPrint=True, vect
         # 1 - recover all separates stages
         Yr = Y.reshape((n,s), order='F') # each line of Yr is one stage
         # 2 - compute residuals as a matrix (one row for each step)
-        res = mass_matrix @ (Yr - y0[:,np.newaxis]) - dt*fun_vectorised(tn+c*dt, Yr).dot(At)
+        res = Yr - y0[:,np.newaxis] - dt*fun_vectorised(tn+c*dt, Yr).dot(At)
         # 3 - reshape the residuals to return a row vector
         return res.reshape((n*s,), order='F')
 
@@ -744,11 +677,6 @@ def FIRK_integration(fun, y0, t_span, nt, method, jacfun=None, bPrint=True, vect
     warm_start_dict = None
     infodict_hist = {} # additonal optional debug storage
     out.infodict_hist = infodict_hist
-    
-    # de quoi interfacer le view newton
-    solver = newton.newtonSolverObj()
-    Dres, LU, Dresinv = None, None, None
-    
     for it, tn in enumerate(t[:-1]):
         if bPrint:
           if np.mod(it,np.floor(nt/10))==0:
@@ -777,11 +705,9 @@ def FIRK_integration(fun, y0, t_span, nt, method, jacfun=None, bPrint=True, vect
             out.nfev += np.nan # not provided...
         elif newtonchoice==2: # custom damped newton
             y_substeps, infodict, warm_start_dict = damped_newton_solve(fun=lambda x: resfun(Y=x,y0=unm1, tn=tn, dt=dt, A=At, n=n, s=s),
-                                                                        x0=np.copy(yini), rtol=1e-9,
-                                                                        ftol=1e-30,
+                                                                        x0=np.copy(yini), rtol=1e-9, ftol=1e-30,
                                                                         jacfun=None, warm_start_dict=warm_start_dict,
-                                                                        itmax=100, jacmax=20, tau_min=1e-4,
-                                                                        convergenceMode=0)
+                                                                        itmax=100, jacmax=20, tau_min=1e-4, convergenceMode=0)
             out.nfev += infodict['nfev']
             out.njev += infodict['njev']
             if infodict['ier']!=0: # Newton did not converge
@@ -804,23 +730,6 @@ def FIRK_integration(fun, y0, t_span, nt, method, jacfun=None, bPrint=True, vect
               else: # backup already initialised
                 for key in infodict_hist.keys():
                   infodict_hist[key].append(infodict[key])
-      
-        elif newtonchoice==3: # custom modified newton without damping            
-            #  gradFun = lambda kni: 1 - dt*A[isub,isub]*gradF(tn+c[isub]*dt, vi + dt*A[isub,isub]*kni)
-            y_substeps, Dres, LU, Dresinv = solver.solveNewton(fun=lambda x: resfun(Y=x,y0=unm1, tn=tn, dt=dt, A=At, n=n, s=s),
-                                        x0=np.copy(yini),
-                                        initJac=Dres,
-                                        initLU=LU,
-                                        initInv=Dresinv,
-                                        jacfun=None,
-                                        options={'eps':1e-12, 'bJustOutputJacobian':False, 'nIterMax':50, 'bVectorisedModelFun':False,
-                                                 'bUseComplexStep':True, 'bUseLUdecomposition':True, 'bUseInvertJacobian':False,
-                                                 'bModifiedNewton':True, 'bDampedNewton':False, 'limitSolution':None,
-                                                 'bDebug':False, 'bDebugPlots':False, 'nMaxBadIters':2, 'nMaxJacRecomputePerTimeStep':5} )
-            out.nfev = solver.nSolverCall
-            out.njev = solver.nJacEval
-            # TODO: take a better Newton, with criteria on Newton step norm, and an option to push convergence as far as possible
-            # out.nLUsolve = solver.nLinearSolve
         elif newtonchoice==4:
             y_substeps = scipy.optimize.newton_krylov(F=lambda x: resfun(Y=x,y0=unm1, tn=tn, dt=dt, A=At, n=n, s=s),
                                                       xin=np.copy(yini), iter=None, rdiff=1e-8,
@@ -835,14 +744,13 @@ def FIRK_integration(fun, y0, t_span, nt, method, jacfun=None, bPrint=True, vect
                                                       line_search='armijo', callback=None)
         else:
             raise Exception('newton choice is not recognised')
+        K[:,:] = fun_vectorised(tn+c*dt, y_substeps.reshape((n,s), order='F'))
         # out.njev += infodict['njev']
 
         if bStifflyAccurate:
             # the last stage is the value at t+dt
             unm1 = y_substeps[-n:]
         else:
-            assert not bDAE
-            K[:,:] = fun_vectorised(tn+c*dt, y_substeps.reshape((n,s), order='F'))
             # Y_{n+1} = Y_{n} + \Delta t \sum\limits_{i=1}^{s} b_i k_i
             # for j in range(s):
                 # unm1[:] = unm1[:] + dt*b[j]*K[:,j]
@@ -858,7 +766,7 @@ def FIRK_integration(fun, y0, t_span, nt, method, jacfun=None, bPrint=True, vect
 
 
 ########################################################################################
-def DIRK_integration(fun, y0, t_span, nt, method, mass_matrix=None, jacfun=None, bPrint=True, newtonchoice=2, fullDebug=False):
+def DIRK_integration(fun, y0, t_span, nt, method, jacfun=None, bPrint=True, newtonchoice=2, fullDebug=False):
     """ Performs the integration of the system dy/dt = f(t,y)
         from t=t_span[0] to t_span[1], with initial condition y(t_span[0])=y0.
         The RK method described by A,b,c may be explicit or diagonally-implicit.
@@ -893,22 +801,12 @@ def DIRK_integration(fun, y0, t_span, nt, method, mass_matrix=None, jacfun=None,
     infodict_hist = {} # additonal optional debug storage
     out.infodict_hist = infodict_hist
 
-    bDAE = True
-    if mass_matrix is None:
-      bDAE = False
-      mass_matrix = np.eye(y0.size)
-      
-      
-    bStifflyAccurate = np.all(b==A[-1,:]) # then the last stage is the solution at the next time point
-
-    # de quoi interfacer le view newton
+    # de quoi itnerfacer le view newton
     solver = newton.newtonSolverObj()
     Dres, LU, Dresinv = None, None, None
 
     for it, tn in enumerate(t[:-1]):
-        
         if bPrint:
-          print('tn=', tn)
           if np.mod(it,np.floor(nt/10))==0:
               print('\n{:.1f} %'.format(100*it/nt), end='')
           if np.mod(it,np.floor(nt/100))==0:
@@ -924,7 +822,7 @@ def DIRK_integration(fun, y0, t_span, nt, method, mass_matrix=None, jacfun=None,
                 kni = fun(tn+c[isub]*dt, vi)
             else:
                  # solve the complete non-linear system via a Newton method
-                tempfun = lambda kni: mass_matrix @ kni - fun(tn+c[isub]*dt, vi + dt*A[isub,isub]*kni)
+                tempfun = lambda kni: kni - fun(tn+c[isub]*dt, vi + dt*A[isub,isub]*kni)
                 if jacfun is None:
                   gradRes = None
                 else:
@@ -980,7 +878,7 @@ def DIRK_integration(fun, y0, t_span, nt, method, mass_matrix=None, jacfun=None,
                                                 initJac=Dres,
                                                 initLU=LU,
                                                 initInv=Dresinv,
-                                                jacfun=None, #gradRes,
+                                                jacfun=gradRes,
                                                 options={'eps':1e-8, 'bJustOutputJacobian':False, 'nIterMax':50, 'bVectorisedModelFun':False,
                                                          'bUseComplexStep':False, 'bUseLUdecomposition':True, 'bUseInvertJacobian':False,
                                                          'bModifiedNewton':True, 'bDampedNewton':False, 'limitSolution':None,
@@ -992,17 +890,10 @@ def DIRK_integration(fun, y0, t_span, nt, method, mass_matrix=None, jacfun=None,
                     raise Exception('newton choice is not recognised')
             K[:,isub] = kni #fun(tn+c[isub]*dt, ui[:,isub])
         ## END OF QUADRATURE STEPS --> reaffect unm1
-        if bStifflyAccurate:
-          for j in range(s):
-              unm1[:] = unm1[:] + dt*b[j]*K[:,j] # normally, as we have formulated it, it should work !
-          y[:,it+1] = unm1[:]
-        else:
-          assert not bDAE
-          for j in range(s):
-              unm1[:] = unm1[:] + dt*b[j]*K[:,j]
-          y[:,it+1] = unm1[:]
-          
+        for j in range(s):
+            unm1[:] = unm1[:] + dt*b[j]*K[:,j]
         K[:,:] = 0.
+        y[:,it+1] = unm1[:]
     # END OF INTEGRATION
     out.y = y
     out.t = t
@@ -1017,29 +908,20 @@ if __name__=='__main__':
     
     #%% Single method test
     #### PARAMETERS ####
-    name2=None
-    problemtype = 'pendulum-index3'
-    # problemtype = 'dae-index2'
+    problemtype = 'stiff'
     
-    mod ='FIRK'
-    name='Radau5'
+    NEWTONCHOICE=3
+    # mod ='FIRK'
+    # name='Radau5'
     # # name='IE'
     
     # mod ='reverseERK'
     # name='EE-sub4-last'
     
-    # mod='adapt_reverseERK'
-    # name="Heun-Euler-modif"
-    # name="Heun-Euler"
-    # name='RK45-modif'  # works
-    # name='RK45-4'
-    # name='RK45-5'
-    # name2='RK45-4'
-    # name = "RK10"
-    # name2 = "RK23"
-    
-    # name="Heun-Euler"
-    # name2="EE"
+    mod='adapt_reverseERK'
+    # name="Heun-Euler-modif" # works !
+    # name="Heun-Euler" # works !
+    name='RK45-modif'
     
     # stabilité infinie = 1/z^ordre !!!
     # embedded complètement gratuit ?!
@@ -1051,11 +933,6 @@ if __name__=='__main__':
     # name='Heun-Euler'
     
     ### Setup and solve the problem
-    nt = 20
-    sol_analytical = None
-    mass_matrix = None
-    jac = None
-    bTransient = False
     if problemtype=='non-stiff': # ODE
         print('Testing time integration routines with mass-spring system')
         k_sur_m = 33.
@@ -1067,74 +944,38 @@ if __name__=='__main__':
 
         y0 = np.array((0.3,1))
         tf = 2.0
-        
+        nt = 20
     elif problemtype=='stiff': #  Hirschfelder-Curtiss
         print('Testing time integration routines with Hirschfelder-Curtiss stiff equation')
-        k=10**3
+        k=100
         def modelfun(t,x):
             """ Mass-spring system"""
-            return -k*(x-np.sin(t+0*np.pi/2))
-        # y0 = np.array((1.,1.))
-        y0 = np.array((0.,0.)) # on the manifold
-        tf = 5.
-        
-    elif problemtype=='dae-index2': # DAE simple : y1'=y1, 0=y1+y2
-        # raise Exception('TODO: DAEs are not yet compatible with the chosen formulation: need to add mass matrix to the problem formulation')
-        def modelfun(t,x):
-          # https://link.springer.com/content/pdf/10.1134/S0965542510060072.pdf#page=9.35
-          return np.array([-(x[0]*x[1]*x[2])**(1/4),
-                            -x[0]*(x[0]**2 + x[1])/x[2],
-                            x[0]**2 - x[1]
-                            ])
-        y0 = np.array([1., 1., 1.])
-        tf = 1.
-        mass_matrix = np.eye(y0.size)
-        mass_matrix[-1,-1] = 0
-        sol_analytical = lambda t: np.vstack([np.exp(-t), np.exp(-2*t), np.exp(-t)])
-        var_index = np.array([0,0,2])
-        bTransient = True
-        
-    elif 'pendulum-index' in problemtype: # pendulum DAE
-      bTransient = True
-      index = int(problemtype[-1])
-      from scipyDAE.tests.pendulum import generateSystem
-      modelfun, jac, mass_matrix, y0, var_index = generateSystem(chosen_index=index, theta_0=np.pi/6,
-                                                                 theta_dot0=0., r0=3., m=1, g=9.81)
-      tf = 1.
-      # jac = None
-        
-        
-        
+            return -k*(x-np.sin(t))
+        y0 = np.array((0.3,1))
+        tf = 5.0
+        nt = 100
+    elif problemtype=='dae': # DAE simple : y1'=y1, 0=y1+y2
+        raise Exception('TODO: DAEs are not yet compatible with the chosen formulation: need to add mass matrix to the problem formulation')
     elif problemtype=='pde':
         raise Exception('TODO')
 
     method = rk_coeffs.getButcher(name=name)
-    if name2 is not None:
-        method2 = rk_coeffs.getButcher(name=name2)
-    else:
-        method2=None
-        
     if mod=='DIRK': # DIRK solve
         sol = DIRK_integration(fun=modelfun, y0=y0, t_span=[0., tf], nt=nt,
-                               mass_matrix=mass_matrix, bPrint=True,
-                               method=method, jacfun=jac)
+                                    method=method, jacfun=None)
     elif mod=='FIRK': # FIRK solve
         sol = FIRK_integration(fun=modelfun, y0=y0, t_span=[0., tf], nt=nt,
-                               mass_matrix=mass_matrix,
-                               method=method, jacfun=None)
+                                    method=method, jacfun=None)
     elif mod=='ERK': # FIRK solve
         sol = ERK_integration(fun=modelfun, y0=y0, t_span=[0., tf], nt=nt,
-                              mass_matrix=mass_matrix,
-                              method=method)
+                                    method=method)
     elif mod=='reverseERK':
         sol = inverseERKintegration(fun=modelfun, y0=y0, t_span=[0,tf], nt=nt,
-                                    mass_matrix=mass_matrix,
                                     method=method, jacfun=None, bPrint=True,
-                                    fullDebug=True, bPlotSubsteps=False)
+                                    fullDebug=True, bPlotSubsteps=True)
     elif mod=='adapt_ERK':
         sol = ERK_adapt_integration(fun=modelfun, y0=y0, t_span=[0.,tf], method=method, first_step=1e-2,
-                                    mass_matrix=mass_matrix,
-                                    atol=1e-3, rtol=1e-3, max_step=np.inf, bPrint=True)
+                                   atol=1e-3, rtol=1e-3, max_step=np.inf, bPrint=True)
         plt.figure()
         plt.semilogy(sol.t[:-1], np.diff(sol.t))
         plt.grid()
@@ -1144,13 +985,12 @@ if __name__=='__main__':
         #                            atol=1e30, rtol=1e30, max_step=tf/30, bPrint=True)
     elif mod=='adapt_reverseERK':
         sol = adaptiveInverseERKintegration(fun=modelfun, y0=y0, t_span=[0.,tf],
-                                            method=method, method2=method2,
-                                          atol=1e-10, rtol=1e-9, max_step=tf,
+                                            method=method,
+                                          atol=1e-7, rtol=1e-4, max_step=tf,
                                           first_step=1e-1,
                                           jacfun=None, bPrint=True,
                                           vectorized=False, fullDebug=True,
-                                          bImplicitEmbedded=False,
-                                          plotStagesAfter=5000, nmax_steps=1000)
+                                          bPlotSubsteps=False)
     
     else:
         raise Exception('mod {} is not recognised'.format(mod))
@@ -1158,128 +998,49 @@ if __name__=='__main__':
     # sol_ref = scipy.integrate.solve_ivp(fun=modelfun, t_span=[0., tf], y0=y0, method='RK45',
     #                                 atol=1e9, rtol=1e9, max_step=dt, first_step=dt)
     ## Compute a reference solution with adaptive time step
-    # sol_ref = scipy.integrate.solve_ivp(fun=modelfun, t_span=[0., tf], y0=y0, method='DOP853', first_step=1e-2,
-    #                                 atol=1e-13, rtol=1e-13)
-    
-    if jac is None: # custom jacobian, avoiding issues with DAE jacobian with Scipy
-      from scipy.optimize._numdiff import approx_derivative
-      jac = lambda t,x: approx_derivative(fun=lambda x: modelfun(t,x),
-                                          x0=x,
-                                          # method="2-point", rel_step=1e-8,
-                                          method="cs", rel_step=1e-50,
-                                          f0=None,
-                                          bounds=(-np.inf, np.inf), sparsity=None,
-                                          as_linear_operator=False, args=(), kwargs={},)
-    if bTransient: # small transient to satisfy DAE conditions
-      tfbis = 1e-10
-      if mass_matrix is None:
-        sol_ref = scipy.integrate.solve_ivp(fun=modelfun, t_span=[0., tfbis], y0=y0,
-                                            method='Radau', dense_output=True,
-                                            first_step=tfbis/2,
-                                            atol=1e-10, rtol=1e-10)
-      else:
-        from scipyDAE.radauDAE import RadauDAE
-        sol_ref = scipy.integrate.solve_ivp(fun=modelfun, t_span=[0., tfbis], y0=y0,
-                                            method=RadauDAE, dense_output=True,
-                                            mass_matrix=mass_matrix, jac=jac,
-                                            first_step=tfbis/2, var_index = var_index,
-                                            atol=1e-8, rtol=1e-8)
-      y0 = sol_ref.y[:,-1]
-        
-    if 1: # custom Radau ref sol
-        method = rk_coeffs.getButcher("Radau11")
-        A,b,c = method['A'], method['b'], method['c']
-        sol_ref = FIRK_integration(fun=modelfun, y0=y0, t_span=[0., tf], nt=1000,
-                               mass_matrix=mass_matrix, method=method, jacfun=jac)  
-  
-        sol_ref.sol = scipy.interpolate.interp1d(x=sol_ref.t, y=sol_ref.y,
-                                     axis=1, kind='cubic')
-        
-      
-    else: # adaptive sol
-      if mass_matrix is None:
-        sol_ref = scipy.integrate.solve_ivp(fun=modelfun, t_span=[0., tf], y0=y0,
-                                            method='Radau', dense_output=True,
-                                            first_step=1e-2,
-                                            atol=1e-10, rtol=1e-10)
-      else:
-        from scipyDAE.radauDAE import RadauDAE
-        sol_ref = scipy.integrate.solve_ivp(fun=modelfun, t_span=[0., tf], y0=y0,
-                                            method=RadauDAE, dense_output=True,
-                                            mass_matrix=mass_matrix, jac=jac,
-                                            first_step=1e-2, var_index = var_index,
-                                            atol=1e-10, rtol=1e-8)
+    sol_ref = scipy.integrate.solve_ivp(fun=modelfun, t_span=[0., tf], y0=y0, method='DOP853', first_step=1e-2,
+                                    atol=1e-13, rtol=1e-13)
+
     plt.figure()
     plt.plot(sol.t, sol.y[0,:], label='position', marker='x')
-    # plt.plot(sol.t, sol.y[1,:], label='vitesse', marker='x')
-    plt.plot(sol_ref.t, sol_ref.y[0,:], label='position ref', linestyle='--', marker='.', markevery=1)
-    # plt.plot(sol_ref.t, sol_ref.y[1,:], label='vitesse ref', linestyle='--', marker=None, markevery=1)
+    plt.plot(sol.t, sol.y[1,:], label='vitesse', marker='x')
+    plt.plot(sol_ref.t, sol_ref.y[0,:], label='position ref', linestyle='--', marker=None, markevery=1)
+    plt.plot(sol_ref.t, sol_ref.y[1,:], label='vitesse ref', linestyle='--', marker=None, markevery=1)
     plt.title('Solutions')
     plt.legend()
     plt.xlabel('time (s)')
     plt.ylabel('position')
     plt.show()
-    
-    plt.figure()
-    plt.semilogy(sol.t[:-1], np.diff(sol.t) , label='num', marker='x')
-    plt.semilogy(sol_ref.t[:-1], np.diff(sol_ref.t) , label='ref', marker='.')
-    plt.title('Time steps')
-    plt.legend()
-    plt.grid()
-    plt.xlabel('t (s)')
-    plt.ylabel('dt (s)')
-    plt.show()
-    
-    # % Analyse écart à la variété d'équilibre
-    # sol_ref = scipy.integrate.solve_ivp(fun=modelfun, t_span=[0., tf], y0=y0, method='Radau', first_step=1e-2,
-    #                                 atol=1e-12, rtol=1e-12, max_step=1e-2)#np.mean(np.diff(sol.t)))
-    # plt.figure()
-    # error = sol.y[0,:] - np.sin(sol.t)
-    # error1= sol_ref.y[0,:] - np.sin(sol_ref.t)
-    # plt.semilogy(sol.t, abs(error), label='num')
-    # plt.semilogy(sol_ref.t, abs(error1), label='ref')
-    # plt.legend()
-    # plt.xlabel('t')
-    # plt.ylabel('absolute distance to sin(t)')
-    # plt.grid()
-    # raise Exception('stop')
-    
+
+    raise Exception('stop')
     #%% Convergence study
     import time as pytime
     t_start = pytime.time()
     # methods = [('Radau5', 'FIRK')] #, ('Radau5', 'DIRK'), ('Radau5', 'ERK')]
     methods = [
-                ('Radau3', 'FIRK'),
-                # ('Radau5_scipy', 'Radau5DAE'),
-                ('Radau5', 'FIRK'),
-                # ('Radau5_julia', 'FIRK'),
-                ('Radau7', 'FIRK'),
-                ('Radau9', 'FIRK'),
-                ('Radau11', 'FIRK'),
+                # ('Radau5', 'FIRK'),
                 # ('reversed-Radau5', 'FIRK'),
-                # ('ESDIRK54A', 'DIRK'),
-                ("ESDIRK5-Skvortsov", "DIRK"),
-                # ("ESDIRK4c-Skvortsov", "DIRK"),
-                # # # ('L-SDIRK-33', 'DIRK'),
-                # # # # ('ESDIRK32A', 'DIRK'),
-                # # # # ('ESDIRK43B', 'DIRK'),
-                # # # ('EE', 'reverseERK'),
-                # # # ('IE', 'DIRK'),
-                # # # ('IE', 'FIRK'),
-                # # # ('EE', 'ERK'),
-                # # ('RK10', 'ERK'),
-                # # ('RK4', 'ERK'),
-                # # ('RK45', 'ERK'),
-                # # ('RK23', 'ERK'),
-                # ('EE',  'reverseERK'),
-                # # ('RK23', 'reverseERK'),
-                # # ('RK4',  'reverseERK'),
+                # # ('ESDIRK54A', 'DIRK'),
+                # # ('L-SDIRK-33', 'DIRK'),
+                # # # ('ESDIRK32A', 'DIRK'),
+                # # # ('ESDIRK43B', 'DIRK'),
+                # # ('EE', 'reverseERK'),
+                # # ('IE', 'DIRK'),
+                # # ('IE', 'FIRK'),
+                # # ('EE', 'ERK'),
+                # ('RK10', 'ERK'),
+                # ('RK4', 'ERK'),
+                # ('RK45', 'ERK'),
+                # ('RK23', 'ERK'),
+                # ('EE', 'reverseERK'),
+                # ('RK23', 'reverseERK'),
+                # ('RK4', 'reverseERK'),
                 # ('RK45', 'reverseERK'),
                 # ('RK10', 'reverseERK'),
 
                 # ('EE',   'ERK'),
-                # # ('RK23', 'ERK'),
-                # # ('RK4',  'ERK'),
+                # ('RK23', 'ERK'),
+                # ('RK4',  'ERK'),
                 # ('RK45', 'ERK'),
                 # ('RK10', 'ERK'),
 
@@ -1294,14 +1055,14 @@ if __name__=='__main__':
                 # ('EE-sub4', 'reverseERK'),
                 
                 
-                # ('RK45', 'ERK'),
-                # ('RK45-modif', 'ERK'),
-                # ('RK45-5', 'ERK'),
-                # ('RK45-4', 'ERK'),
-                # ('RK45', 'reverseERK'),
-                # ('RK45-modif', 'reverseERK'),
-                # ('RK45-5', 'reverseERK'),
-                # ('RK45-4', 'reverseERK'),
+                ('RK45', 'ERK'),
+                ('RK45-modif', 'ERK'),
+                ('RK45-5', 'ERK'),
+                ('RK45-4', 'ERK'),
+                ('RK45', 'reverseERK'),
+                ('RK45-modif', 'reverseERK'),
+                ('RK45-5', 'reverseERK'),
+                ('RK45-4', 'reverseERK'),
                 # # ('RK45', 'reverseERK'),
                 # # ('reversed-RK45', 'FIRK'),
 
@@ -1310,7 +1071,6 @@ if __name__=='__main__':
                 # ('Heun-Euler-1', 'reverseERK'),
                 # ('Heun-Euler-2', 'reverseERK'),
                 ]
-    # nt_vec = np.logspace(np.log10(2), np.log10(250), 20).astype(int)
     nt_vec = np.logspace(np.log10(2), np.log10(250), 20).astype(int)
     sols=[]
     for name, mod in methods:
@@ -1319,112 +1079,42 @@ if __name__=='__main__':
         A,b,c = method['A'], method['b'], method['c']
          
         for nt in nt_vec:
-            try:
-              if mod=='DIRK': # DIRK solve
-                  sol = DIRK_integration(fun=modelfun, y0=y0, t_span=[0., tf], nt=nt,
-                                         mass_matrix=mass_matrix, method=method, jacfun=None)
-              elif mod=='FIRK': # FIRK solve
-                  sol = FIRK_integration(fun=modelfun, y0=y0, t_span=[0., tf], nt=nt,
-                                         mass_matrix=mass_matrix, method=method, jacfun=jac)
-              elif mod=='ERK': # FIRK solve
-                  sol = ERK_integration(fun=modelfun, y0=y0, t_span=[0., tf], nt=nt,
-                                        mass_matrix=mass_matrix, method=method, bPrint=False)
-              elif mod=='reverseERK': # reversed solve
-                  sol = inverseERKintegration(fun=modelfun, y0=y0, t_span=[0,tf], nt=nt,
-                                              mass_matrix=mass_matrix, method=method, jacfun=None, bPrint=True,
-                                              fullDebug=True)
-              elif mod=="Radau5DAE": #my scipy mode for DAE with Radau5
-                  assert 'radau5' in name.lower()
-                  from scipyDAE.radauDAE import RadauDAE
-                  sol = scipy.integrate.solve_ivp(fun=modelfun, t_span=[0., tf], y0=y0,
-                                                  method=RadauDAE, dense_output=False,
-                                                  mass_matrix=mass_matrix, jac=jac,
-                                                  first_step=tf/(nt-1), max_step=tf/(nt-1),
-                                                  var_index = var_index,
-                                                  newton_tol=1e-18,
-                                                  atol=1e10, rtol=1e10)
-                  assert sol.t.size == nt
-              else:
-                  raise Exception('mod {} is not recognised'.format(mod))
-            except Exception as e:
-              print(e)
-              sol=None
-              
+            if mod=='DIRK': # DIRK solve
+                sol = DIRK_integration(fun=modelfun, y0=y0, t_span=[0., tf], nt=nt,
+                                            method=method, jacfun=None)
+            elif mod=='FIRK': # FIRK solve
+                sol = FIRK_integration(fun=modelfun, y0=y0, t_span=[0., tf], nt=nt,
+                                            method=method, jacfun=None)
+            elif mod=='ERK': # FIRK solve
+                sol = ERK_integration(fun=modelfun, y0=y0, t_span=[0., tf], nt=nt,
+                                            method=method, bPrint=False)
+            elif mod=='reverseERK': # reversed solve
+                sol = inverseERKintegration(fun=modelfun, y0=y0, t_span=[0,tf], nt=nt,
+                                            method=method, jacfun=None, bPrint=True,
+                                            fullDebug=True)
+            else:
+                raise Exception('mod {} is not recognised'.format(mod))
             sols[-1].append(sol)
-            
-            if sol is None:
-              continue
-            
-            plt.figure()
-            plt.plot(sol.t, sol.y[0,:], label=name)
-            plt.plot(sol_ref.t, sol_ref.y[0,:], label="ref", linestyle='--')
-            if sol_analytical:
-              plt.plot(sol_ref.t, sol_analytical(sol_ref.t)[0,:], label="analytical", linestyle=':')
-            plt.grid()
-            plt.xlabel('t')
-            plt.ylabel("sol")
-            plt.legend()
-            plt.show()
-            
     t_end = pytime.time()
     print('done in {}s with newtonchoice={}'.format(t_end-t_start, NEWTONCHOICE))
 
 
-    #%% Error analysis
+#%% Error analysis
     fig_conv = plt.figure()
     for j, (name, mod) in enumerate(methods):
         current_sols = sols[j]
         # compute error
         imax = np.argmax(nt_vec)
-        error = np.zeros((len(nt_vec),))*np.nan
-        error2 = np.zeros((len(nt_vec),))*np.nan
+        error = np.zeros((len(nt_vec),))
+        error2 = np.zeros((len(nt_vec),))
         for i in range(len(nt_vec)):
-            if current_sols[i] is None:
-              continue
-            # interped_ref = scipy.interpolate.interp1d(x=sol_ref.t, y=sol_ref.y,
-            #                                           axis=1, kind='cubic')( current_sols[i].t )
-            interped_ref = sol_ref.sol( current_sols[i].t )
-            ibeg = min(current_sols[i].t.size-1, 10)
-            error[i]  = np.sqrt( np.sum( (current_sols[i].y[:,ibeg:] - interped_ref[:,ibeg:])**2 *np.diff(current_sols[i].t[ibeg-1:]) ) ) / ( current_sols[i].t[-1]-current_sols[i].t[ibeg-1])
-            error2[i] = np.linalg.norm( current_sols[i].y[:,-1]-sol_ref.y[:,-1] ) # final time error
-        p,=fig_conv.gca().loglog(nt_vec, error2, label='{} ({})'.format(name, mod), marker='.', alpha=1)
-        # fig_conv.gca().loglog(nt_vec, error, label=None, marker='.', alpha=0.3, color=p.get_color()
-    # plt.plot(np.nan, np.nan, alpha=0.3, color='k', label="final time error")
-    plt.plot(np.nan, np.nan, alpha=1, color='k', label="L2 time error")
+            interped_ref = scipy.interpolate.interp1d(x=sol_ref.t, y=sol_ref.y,
+                                                      axis=1, kind='cubic')( current_sols[i].t )
+            error[i]  = np.linalg.norm( (current_sols[i].y - interped_ref) )
+            error2[i] = np.linalg.norm( current_sols[i].y[:,-1]-sol_ref.y[:,-1] )
+        # fig_conv.gca().loglog(nt_vec, error, label='{} ({})'.format(name, mod), marker='.')
+        fig_conv.gca().loglog(nt_vec, error2, label='{} ({})'.format(name, mod), marker='.')
     fig_conv.gca().legend(framealpha=0.25)
-    plt.xlabel("nt")
-    plt.ylabel("error")
     fig_conv.gca().grid()
-    fig_conv.gca().set_ylim(1e-12,1e0)
-    # plt.title(f'Convergence for {problemtype} problem (k={k:.2e}, tf={tf:.2e})')
-    plt.title(f'Convergence curves for {problemtype} problem (tf={tf:.2e})')
+    fig_conv.gca().set_ylim(1e-12,1e-1)
     
-    #%% Convergence orders
-    fig_conv = plt.figure()
-    for j, (name, mod) in enumerate(methods):
-        current_sols = sols[j]
-        # compute error
-        imax = np.argmax(nt_vec)
-        error = np.zeros((len(nt_vec),))*np.nan
-        error2 = np.zeros((len(nt_vec),))*np.nan
-        for i in range(len(nt_vec)):
-            if current_sols[i] is None:
-              continue
-            # interped_ref = scipy.interpolate.interp1d(x=sol_ref.t, y=sol_ref.y,
-            #                                           axis=1, kind='cubic')( current_sols[i].t )
-            interped_ref = sol_ref.sol( current_sols[i].t )
-            ibeg = min(current_sols[i].t.size-1, 10)
-            error[i]  = np.sqrt( np.sum( (current_sols[i].y[:,ibeg:] - interped_ref[:,ibeg:])**2 *np.diff(current_sols[i].t[ibeg-1:]) ) ) / ( current_sols[i].t[-1]-current_sols[i].t[ibeg-1])
-            error2[i] = np.linalg.norm( current_sols[i].y[:,-1]-sol_ref.y[:,-1] ) # final time error
-        p,=fig_conv.gca().semilogx(nt_vec[1:], np.diff(np.log(error))/np.diff(np.log(1/nt_vec)), label='{} ({})'.format(name, mod), marker='.')
-        fig_conv.gca().semilogx(nt_vec[1:], np.diff(np.log(error2))/np.diff(np.log(1/nt_vec)), label=None, marker='.', color=p.get_color(), alpha=0.5)
-        
-    fig_conv.gca().legend(framealpha=0.25)
-    plt.xlabel("nt")
-    plt.ylabel("error")
-    fig_conv.gca().grid()
-    fig_conv.gca().set_ylim(0,10)
-    # plt.title(f'Convergence for {problemtype} problem (k={k:.2e}, tf={tf:.2e})')
-    plt.title(f'Convergence orders for {problemtype} problem (tf={tf:.2e})')
-    
-
